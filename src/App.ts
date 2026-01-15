@@ -121,6 +121,10 @@ export class App {
 
 	renderTop() {
 		const user = this.state.user;
+		if (!user) {
+			utils.navigateTo("/login");
+			return;
+		}
 		if (user && !this.state.profileLoaded && !this.state.profileLoading) {
 			this.state = { ...this.state, profileLoading: true };
 			void this.loadUserProfile();
