@@ -30,6 +30,18 @@ body {
 	padding: 10px 12px;
 }
 
+.my-card {
+	width: 400px;
+	max-width: 100%;
+}
+
+.my-card .btn {
+	border-width: 2px;
+	border-radius: 12px;
+	padding: 10px 16px;
+	min-width: 120px;
+}
+
 .loading {
 	font-size: 16px;
 	color: #666666;
@@ -58,6 +70,179 @@ body {
 
 .as-toast.info {
 	border-left-color: #ffc107;
+}
+
+.as-menu-button {
+	position: fixed;
+	top: 16px;
+	left: 16px;
+	width: 36px;
+	height: 28px;
+	border: none;
+	background: transparent;
+	padding: 0;
+	cursor: pointer;
+	z-index: 1090;
+	transition: opacity 0.2s ease;
+}
+
+.as-menu-button:not(.is-under) {
+	transition-delay: 0.5s;
+}
+
+.as-menu-button.is-under {
+	z-index: 1070;
+	pointer-events: none;
+	opacity: 0;
+	transition-delay: 0s;
+}
+
+.as-menu-button span,
+.as-menu-button span::before,
+.as-menu-button span::after {
+	content: "";
+	position: absolute;
+	left: 50%;
+	top: 50%;
+	width: 28px;
+	height: 3px;
+	background: #111111;
+	border-radius: 2px;
+	transform: translate(-50%, -50%);
+}
+
+.as-menu-button span::before,
+.as-menu-button span::after {
+	left: 0;
+	transform: none;
+}
+
+.as-menu-button span::before {
+	top: -8px;
+}
+
+.as-menu-button span::after {
+	top: 8px;
+}
+
+.as-menu-container {
+	position: fixed;
+	inset: 0;
+	z-index: 1085;
+	pointer-events: none;
+}
+
+.as-menu-container.open {
+	pointer-events: auto;
+}
+
+.as-menu-backdrop {
+	display: none;
+	position: absolute;
+	inset: 0;
+	background: transparent;
+}
+
+.as-menu-container.open .as-menu-backdrop {
+	display: block;
+}
+
+.as-menu-inner {
+	position: absolute;
+	top: 0;
+	left: 0;
+	width: 400px;
+	max-width: 85%;
+	height: 100%;
+	background: #f2f2f2;
+	padding: 20px 16px;
+	transform: translateX(-100%);
+	transition: transform 0.5s ease;
+	display: flex;
+	flex-direction: column;
+}
+
+.as-menu-container.open .as-menu-inner {
+	transform: translateX(0);
+}
+
+.as-menu-header {
+	display: flex;
+	justify-content: flex-start;
+	margin-bottom: 20px;
+}
+
+.as-menu-close {
+	background: transparent;
+	border: none;
+	display: inline-flex;
+	align-items: center;
+	gap: 8px;
+	cursor: pointer;
+	padding: 4px;
+}
+
+.as-menu-close-icon {
+	position: relative;
+	width: 20px;
+	height: 20px;
+}
+
+.as-menu-close-icon::before,
+.as-menu-close-icon::after {
+	content: "";
+	position: absolute;
+	top: 50%;
+	left: 50%;
+	width: 24px;
+	height: 2px;
+	background: #111111;
+	transform-origin: center;
+}
+
+.as-menu-close-icon::before {
+	transform: translate(-50%, -50%) rotate(45deg);
+}
+
+.as-menu-close-icon::after {
+	transform: translate(-50%, -50%) rotate(-45deg);
+}
+
+.as-menu-close-text {
+	font-size: 12px;
+	font-weight: 600;
+}
+
+.as-menu-list {
+	list-style: none;
+	padding: 0;
+	margin: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+}
+
+.as-menu-item {
+	font-size: 13px;
+	border-bottom: 1px solid rgba(0, 0, 0, 0.3);
+	padding-bottom: 8px;
+}
+
+.as-menu-link {
+	background: none;
+	border: none;
+	padding: 0;
+	text-align: left;
+	width: 100%;
+	color: #111111;
+	font: inherit;
+	cursor: pointer;
+	text-decoration: none;
+}
+
+.as-menu-link:disabled {
+	opacity: 0.6;
+	cursor: not-allowed;
 }
 
 @media (max-width: 768px) {
