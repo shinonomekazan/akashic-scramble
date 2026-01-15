@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="ja">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<title>Akashic Scramble</title>
+		<link rel="stylesheet" href="/css/styles.css" />
+		<script src="/js/vendor.bundle.js"></script>
+		<script src="/js/akashic.bundle.js"></script>
+	</head>
+	<body>
+		<div id="app-root"></div>
+		<div id="toast" aria-live="polite"></div>
+
+		<script>
+			const tool = new app.App();
+			document.addEventListener("DOMContentLoaded", () => {
+				tool.main();
+			});
+		</script>
+	</body>
+</html>

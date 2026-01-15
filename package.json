@@ -1,0 +1,34 @@
+{
+	"name": "akashic-scramble",
+	"version": "0.1.0",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"build": "webpack",
+		"build:watch": "webpack --watch",
+		"format": "prettier --write .",
+		"start:emulator": "firebase emulators:start",
+		"deploy:firestore": "firebase deploy --only firestore",
+		"deploy:storage": "firebase deploy --only storage",
+		"deploy:hosting": "firebase deploy --only hosting"
+	},
+	"dependencies": {
+		"firebase": "^11.7.1"
+	},
+	"devDependencies": {
+		"css-loader": "^7.1.2",
+		"dotenv-webpack": "^8.1.0",
+		"firebase-tools": "^15.1.0",
+		"prettier": "^3.5.3",
+		"style-loader": "^4.0.0",
+		"terser-webpack-plugin": "^5.3.14",
+		"ts-loader": "^9.5.2",
+		"typescript": "^5.8.3",
+		"webpack": "^5.99.1",
+		"webpack-cli": "^6.0.1"
+	},
+	"engines": {
+		"node": ">=20"
+	},
+	"license": "MIT"
+}
