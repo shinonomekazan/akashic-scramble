@@ -36,6 +36,10 @@ export function parseRoute(): Route {
 	return { name: "top" };
 }
 
+export function isStaticPath(pathname = window.location.pathname || "/") {
+	return pathname.startsWith("/static/");
+}
+
 export function navigateTo(path: string) {
 	const url = new URL(location.href);
 	url.hash = "";
