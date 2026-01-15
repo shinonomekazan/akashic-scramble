@@ -1,0 +1,7 @@
+node_modules
+*.md
+public/**/*.min.*
+firestore.rules
+functions
+public*/js/*.bundle.js
+bootstrap.min.css

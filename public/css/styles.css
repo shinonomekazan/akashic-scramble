@@ -1,0 +1,67 @@
+:root {
+	color-scheme: light;
+}
+
+* {
+	box-sizing: border-box;
+}
+
+body {
+	margin: 0;
+	min-height: 100vh;
+	font-family: "Space Grotesk", "Segoe UI", sans-serif;
+	color: #111111;
+	background: #ffffff;
+}
+
+#app-root {
+	min-height: 100vh;
+	padding: 0;
+}
+
+.login-card {
+	width: 240px;
+	max-width: 100%;
+}
+
+.login-card .btn {
+	border-width: 2px;
+	border-radius: 12px;
+	padding: 10px 12px;
+}
+
+.loading {
+	font-size: 16px;
+	color: #666666;
+}
+
+.as-toast {
+	position: fixed;
+	right: 16px;
+	bottom: 16px;
+	z-index: 1080;
+	background: #ffffff;
+	border: 1px solid #dee2e6;
+	border-left: 4px solid #198754;
+	padding: 12px 16px;
+	border-radius: 10px;
+	box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+	transition: opacity 0.3s ease;
+	opacity: 0;
+	color: #212529;
+	max-width: 320px;
+}
+
+.as-toast.error {
+	border-left-color: #dc3545;
+}
+
+.as-toast.info {
+	border-left-color: #ffc107;
+}
+
+@media (max-width: 768px) {
+	.login-card {
+		max-width: 100%;
+	}
+}
