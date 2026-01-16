@@ -1,0 +1,29 @@
+name: Functionsデプロイ
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - "functions/**"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set Node.js version
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: |
+            package-lock.json
+            functions/package-lock.json
+      - name: デプロイ用.envひな型の作成
+        run: cp ./functions/.env.production ./functions/.env
+      - name: npm ci
+        run: npm ci && npm --prefix ./functions ci
+      - name: Deploy functions
+        run: npm run deploy:functions -- --token=${{ secrets.FIREBASE_TOKEN_AKASHIC_SCRAMBLE }}
