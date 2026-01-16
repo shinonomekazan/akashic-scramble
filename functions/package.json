@@ -1,0 +1,33 @@
+{
+	"name": "akashic-scrambnle-functions",
+	"scripts": {
+		"build": "tsc",
+		"build:watch": "tsc --watch",
+		"serve": "npm run build && firebase emulators:start --only functions",
+		"shell": "npm run build && firebase functions:shell",
+		"start": "cross-env DOTENV_CONFIG_PATH=./.env.local node lib/start.js",
+		"format": "prettier --write .",
+		"deploy": "firebase deploy --only functions",
+		"logs": "firebase functions:log"
+	},
+	"engines": {
+		"node": "22"
+	},
+	"main": "lib/index.js",
+	"dependencies": {
+		"express": "^4.21.2",
+		"express-promise-router": "^4.1.1",
+		"express-validator": "^7.2.1",
+		"firebase-admin": "^13.6.0",
+		"firebase-functions": "^7.0.0"
+	},
+	"devDependencies": {
+		"@google-cloud/firestore": "^7.11.6",
+		"@google-cloud/storage": "^7.17.3",
+		"dotenv": "^16.5.0",
+		"prettier": "^3.5.3",
+		"ts-node": "^10.9.2",
+		"typescript": "^5.9.3"
+	},
+	"private": true
+}
