@@ -10,4 +10,11 @@ export type FirebaseConfig = {
 
 export type AppConfig = {
 	firebaseConfig: FirebaseConfig;
+	apiConfig: ApiConfig;
 };
+
+export interface ApiConfig {
+	baseUrl: string;
+	emulatorBaseUrl?: string;
+	apiKey?: string;
+}

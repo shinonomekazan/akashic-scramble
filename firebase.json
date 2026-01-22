@@ -33,6 +33,10 @@
 				"destination": "/index.html"
 			},
 			{
+				"source": "/my/edit",
+				"destination": "/index.html"
+			},
+			{
 				"source": "/login",
 				"destination": "/index.html"
 			}

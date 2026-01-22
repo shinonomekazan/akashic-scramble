@@ -8,6 +8,7 @@ export function register(app: App) {
 
 	app.register({
 		"/": controllers.SystemController,
+		"/users": controllers.UsersController,
 	});
 
 	app.use(fw.middlewares.UndefinedRouteHandler);

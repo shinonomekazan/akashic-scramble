@@ -23,10 +23,13 @@ export function isDebugMode() {
 	return isXXXMode("debug");
 }
 
-export type Route = { name: "login" } | { name: "my" } | { name: "top" };
+export type Route = { name: "login" } | { name: "my" } | { name: "my-edit" } | { name: "top" };
 
 export function parseRoute(): Route {
 	const path = window.location.pathname || "/";
+	if (path.startsWith("/my/edit")) {
+		return { name: "my-edit" };
+	}
 	if (path.startsWith("/my")) {
 		return { name: "my" };
 	}
