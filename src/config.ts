@@ -19,15 +19,23 @@ function resolveEnv(key: keyof typeof fallbackEnv): string {
 }
 
 export function configure(): AppConfig {
+	const projectId = resolveEnv("FIREBASE_PROJECT_ID");
+	const functionsRegion = "asia-northeast1";
+	const apiKey = process.env.API_KEY ?? process.env.FUNCTIONS_API_KEY;
 	return {
 		firebaseConfig: {
 			apiKey: resolveEnv("FIREBASE_API_KEY"),
 			authDomain: resolveEnv("FIREBASE_AUTH_DOMAIN"),
-			projectId: resolveEnv("FIREBASE_PROJECT_ID"),
+			projectId,
 			storageBucket: resolveEnv("FIREBASE_STORAGE_BUCKET"),
 			messagingSenderId: resolveEnv("FIREBASE_MESSAGING_SENDER_ID"),
 			appId: resolveEnv("FIREBASE_APP_ID"),
 			measurementId: resolveEnv("FIREBASE_MEASUREMENT_ID"),
+		},
+		apiConfig: {
+			baseUrl: `https://${functionsRegion}-${projectId}.cloudfunctions.net/api`,
+			emulatorBaseUrl: `http://127.0.0.1:5001/${projectId}/${functionsRegion}/api`,
+			apiKey,
 		},
 	};
 }

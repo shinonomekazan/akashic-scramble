@@ -1,6 +1,8 @@
 import { connectAuthEmulator, type User as FirebaseUser } from "firebase/auth";
 import { connectFirestoreEmulator } from "firebase/firestore";
 import { signInWithGoogle, signOutCurrentUser, watchAuthChanges } from "./auth";
+import { Client as ApiClient } from "./api/client";
+import { createUser, updateUser } from "./api/users";
 import { appConfig } from "./config";
 import type { AppConfig } from "./config.types";
 import { initializeFirebase, type FirebaseInstance } from "./firebase";
@@ -15,10 +17,12 @@ type AuthState = {
 	profile: FirestoreUser | null;
 	profileLoaded: boolean;
 	profileLoading: boolean;
+	needsProfile: boolean;
 };
 
 export class App {
 	firebase: FirebaseInstance;
+	client: ApiClient;
 	config: AppConfig;
 	rootEl: HTMLElement;
 	toastEl: HTMLElement;
@@ -29,6 +33,17 @@ export class App {
 		this.rootEl = this.getRoot();
 		this.toastEl = utils.qsStrict<HTMLElement>("#toast");
 		this.firebase = initializeFirebase(this.config.firebaseConfig);
+		this.client = new ApiClient({
+			apiConfig: this.config.apiConfig,
+			useEmulator: utils.isDebugMode(),
+		});
+		this.client.idTokenFunction = async () => {
+			const currentUser = this.firebase.auth.currentUser;
+			if (!currentUser) {
+				throw new Error("Authorization not found");
+			}
+			return currentUser.getIdToken();
+		};
 		this.connectEmulatorIfDebug();
 		this.state = {
 			user: null,
@@ -36,6 +51,7 @@ export class App {
 			profile: null,
 			profileLoaded: false,
 			profileLoading: false,
+			needsProfile: false,
 		};
 	}
 
@@ -49,6 +65,7 @@ export class App {
 				profile: null,
 				profileLoaded: false,
 				profileLoading: false,
+				needsProfile: false,
 			};
 			this.render();
 		});
@@ -85,6 +102,9 @@ export class App {
 				break;
 			case "my":
 				this.renderMy();
+				break;
+			case "my-edit":
+				this.renderMyEdit();
 				break;
 			case "top":
 				this.renderTop();
@@ -126,7 +146,6 @@ export class App {
 			return;
 		}
 		if (user && !this.state.profileLoaded && !this.state.profileLoading) {
-			this.state = { ...this.state, profileLoading: true };
 			void this.loadUserProfile();
 		}
 
@@ -136,6 +155,16 @@ export class App {
 		`;
 
 		this.bindMenuEvents(user);
+	}
+
+	getDefaultProfile(user: FirebaseUser): FirestoreUser {
+		return {
+			uid: user.uid,
+			name: "未設定",
+			photoURL: null,
+			createdAt: null,
+			updatedAt: null,
+		};
 	}
 
 	renderMy() {
@@ -151,35 +180,32 @@ export class App {
 		}
 
 		if (!this.state.profileLoaded) {
-			this.state = { ...this.state, profileLoading: true };
 			this.rootEl.innerHTML = '<div class="loading">読み込み中...</div>';
 			void this.loadUserProfile();
 			return;
 		}
 
-		const profile = this.state.profile ?? {
-			uid: user.uid,
-			name: "未設定",
-			photoURL: null,
-			createdAt: null,
-			updatedAt: null,
-		};
+		if (this.state.needsProfile) {
+			this.renderProfileSetup(false);
+			return;
+		}
+
+		const profile = this.state.profile ?? this.getDefaultProfile(user);
 
 		const menuMarkup = this.renderMenuMarkup(user, profile);
 		this.rootEl.innerHTML = `
 			<div class="min-vh-100 d-flex align-items-center justify-content-center py-5 position-relative">
-				<button id="logout" class="btn btn-outline-secondary position-absolute top-0 end-0 m-3">ログアウト</button>
 				<div class="my-card text-center">
 					<h1 class="h5 mb-3" id="my-title"></h1>
 					<div class="d-flex justify-content-center gap-2 mb-1">
-						<span>ユーザーID</span>
+						<span>ユーザーID:</span>
 						<span id="my-user-id"></span>
 					</div>
 					<div class="d-flex justify-content-center gap-2 mb-4">
-						<span>ユーザー名</span>
+						<span>ユーザー名:</span>
 						<span id="my-user-name"></span>
 					</div>
-					<button id="my-edit" class="btn btn-outline-dark">編集</button>
+					<button id="my-edit" class="btn btn-outline-secondary">編集</button>
 				</div>
 			</div>
 			${menuMarkup}
@@ -193,60 +219,249 @@ export class App {
 		const userNameEl = utils.qsStrict<HTMLElement>("#my-user-name", this.rootEl);
 		userNameEl.textContent = displayName;
 
-		const logoutBtn = utils.qsStrict<HTMLButtonElement>("#logout", this.rootEl);
-		logoutBtn.addEventListener("click", async () => {
-			logoutBtn.disabled = true;
-			try {
-				await signOutCurrentUser(this.firebase);
-				this.showToast("ログアウトしました。", "success");
-				utils.navigateTo("/login");
-			} catch (err) {
-				const message = err instanceof Error ? err.message : "ログアウトに失敗しました。";
-				this.showToast(message, "error");
-				logoutBtn.disabled = false;
-			}
-		});
-
 		const editBtn = utils.qsStrict<HTMLButtonElement>("#my-edit", this.rootEl);
 		editBtn.addEventListener("click", () => {
-			this.showToast("機能は開発中です。", "info");
+			utils.navigateTo("/my/edit");
 		});
 
 		this.bindMenuEvents(user);
 	}
 
-	async loadUserProfile() {
+	renderProfileSetup(isEditRoute: boolean) {
 		const user = this.state.user;
-		if (!user) return;
+		if (!user) {
+			utils.navigateTo("/login");
+			return;
+		}
+
+		const existingName = isEditRoute ? (this.state.profile?.name ?? "") : "";
+		const menuMarkup = this.renderMenuMarkup(user, this.state.profile);
+		this.rootEl.innerHTML = `
+			<div class="min-vh-100 d-flex align-items-center justify-content-center py-5 position-relative">
+				<div class="my-card">
+					<h1 class="h5 mb-3 text-center">プロフィール登録</h1>
+					<form id="profile-setup-form" class="text-start">
+						<div class="mb-4">
+							<label class="form-label" for="profile-name">ユーザー名</label>
+							<input
+								id="profile-name"
+								class="form-control"
+								type="text"
+								placeholder="名前を入力"
+								autocomplete="name"
+								maxlength="40"
+								required
+							/>
+						</div>
+						<div class="d-grid">
+							<button id="profile-save" class="btn btn-outline-secondary" type="submit">確定</button>
+						</div>
+					</form>
+				</div>
+			</div>
+			${menuMarkup}
+		`;
+
+		const form = utils.qsStrict<HTMLFormElement>("#profile-setup-form", this.rootEl);
+		const nameInput = utils.qsStrict<HTMLInputElement>("#profile-name", this.rootEl);
+		const saveBtn = utils.qsStrict<HTMLButtonElement>("#profile-save", this.rootEl);
+
+		nameInput.value = existingName;
+		nameInput.focus();
+
+		form.addEventListener("submit", async (event) => {
+			event.preventDefault();
+			const name = nameInput.value.trim();
+			if (!name) {
+				this.showToast("ユーザー名を入力してください。", "info");
+				nameInput.focus();
+				return;
+			}
+
+			saveBtn.disabled = true;
+			saveBtn.textContent = "保存中...";
+			try {
+				await createUser(this.client, name);
+				this.showToast("プロフィールを登録しました。", "success");
+				this.state = {
+					...this.state,
+					profile: null,
+					profileLoaded: false,
+					profileLoading: false,
+					needsProfile: false,
+				};
+				if (isEditRoute) {
+					utils.navigateTo("/my");
+					return;
+				}
+				this.render();
+			} catch (err) {
+				const message = err instanceof Error ? err.message : "ユーザー情報の登録に失敗しました。";
+				this.showToast(message, "error");
+			} finally {
+				saveBtn.disabled = false;
+				saveBtn.textContent = "確定";
+			}
+		});
+
+		this.bindMenuEvents(user);
+	}
+
+	renderMyEdit() {
+		const user = this.state.user;
+		if (!user) {
+			utils.navigateTo("/login");
+			return;
+		}
+
+		if (this.state.profileLoading) {
+			this.rootEl.innerHTML = '<div class="loading">読み込み中...</div>';
+			return;
+		}
+
+		if (!this.state.profileLoaded) {
+			this.rootEl.innerHTML = '<div class="loading">読み込み中...</div>';
+			void this.loadUserProfile();
+			return;
+		}
+
+		if (this.state.needsProfile) {
+			this.renderProfileSetup(true);
+			return;
+		}
+
+		const profile = this.state.profile ?? this.getDefaultProfile(user);
+		const menuMarkup = this.renderMenuMarkup(user, profile);
+		this.rootEl.innerHTML = `
+			<div class="min-vh-100 d-flex align-items-center justify-content-center py-5 position-relative">
+				<div class="my-card">
+					<h1 class="h5 mb-3 text-center">プロフィール編集</h1>
+					<form id="my-edit-form" class="text-start">
+						<div class="mb-3">
+							<label class="form-label" for="edit-user-id">ユーザーID</label>
+							<div id="edit-user-id" class="form-control-plaintext"></div>
+						</div>
+						<div class="mb-4">
+							<label class="form-label" for="edit-name">ユーザー名</label>
+							<input
+								id="edit-name"
+								name="name"
+								type="text"
+								class="form-control"
+								maxlength="40"
+								required
+							/>
+						</div>
+						<div class="d-flex justify-content-center gap-2">
+							<button id="edit-save" class="btn btn-outline-secondary" type="submit">保存</button>
+							<button id="edit-cancel" class="btn btn-outline-secondary" type="button">キャンセル</button>
+						</div>
+					</form>
+				</div>
+			</div>
+			${menuMarkup}
+		`;
+
+		const userIdEl = utils.qsStrict<HTMLElement>("#edit-user-id", this.rootEl);
+		userIdEl.textContent = profile.uid;
+		const nameInput = utils.qsStrict<HTMLInputElement>("#edit-name", this.rootEl);
+		nameInput.value = profile.name ?? "";
+
+		const form = utils.qsStrict<HTMLFormElement>("#my-edit-form", this.rootEl);
+		form.addEventListener("submit", (event) => {
+			event.preventDefault();
+			void this.submitMyEdit(form);
+		});
+
+		const cancelButton = utils.qsStrict<HTMLButtonElement>("#edit-cancel", this.rootEl);
+		cancelButton.addEventListener("click", () => {
+			utils.navigateTo("/my");
+		});
+
+		this.bindMenuEvents(user);
+	}
+
+	async submitMyEdit(form: HTMLFormElement) {
+		const user = this.state.user;
+		if (!user) {
+			utils.navigateTo("/login");
+			return;
+		}
+
+		const nameInput = utils.qsStrict<HTMLInputElement>("#edit-name", form);
+		const saveButton = utils.qsStrict<HTMLButtonElement>("#edit-save", form);
+		const cancelButton = utils.qsStrict<HTMLButtonElement>("#edit-cancel", form);
+
+		const nextName = nameInput.value.trim();
+		if (!nextName) {
+			this.showToast("ユーザー名を入力してください。", "info");
+			nameInput.focus();
+			return;
+		}
+
+		const previousLabel = saveButton.textContent ?? "保存";
+		saveButton.disabled = true;
+		cancelButton.disabled = true;
+		saveButton.textContent = "保存中...";
 
 		try {
-			const profile = await getUser(this.firebase.firestore, user.uid);
+			await updateUser(this.client, { name: nextName });
+			const baseProfile = this.state.profile ?? this.getDefaultProfile(user);
 			this.state = {
 				...this.state,
-				profile: profile ?? {
+				profile: {
+					...baseProfile,
 					uid: user.uid,
-					name: "未設定",
-					photoURL: null,
-					createdAt: null,
-					updatedAt: null,
+					name: nextName,
 				},
 				profileLoaded: true,
 				profileLoading: false,
+				needsProfile: false,
+			};
+			this.showToast("保存しました。", "success");
+			utils.navigateTo("/my");
+		} catch (err) {
+			const message = err instanceof Error ? err.message : "ユーザー情報の更新に失敗しました。";
+			this.showToast(message, "error");
+		} finally {
+			saveButton.disabled = false;
+			cancelButton.disabled = false;
+			saveButton.textContent = previousLabel;
+		}
+	}
+
+	async loadUserProfile() {
+		const user = this.state.user;
+		if (!user || this.state.profileLoading) return;
+
+		this.state = { ...this.state, profileLoading: true };
+		try {
+			const profile = await getUser(this.firebase.firestore, user.uid);
+			if (!profile) {
+				this.state = {
+					...this.state,
+					profile: null,
+					profileLoaded: true,
+					profileLoading: false,
+					needsProfile: true,
+				};
+				return;
+			}
+			this.state = {
+				...this.state,
+				profile,
+				profileLoaded: true,
+				profileLoading: false,
+				needsProfile: false,
 			};
 		} catch (err) {
 			const message = err instanceof Error ? err.message : "ユーザー情報の取得に失敗しました。";
 			this.showToast(message, "error");
 			this.state = {
 				...this.state,
-				profile: {
-					uid: user.uid,
-					name: "未設定",
-					photoURL: null,
-					createdAt: null,
-					updatedAt: null,
-				},
 				profileLoaded: true,
 				profileLoading: false,
+				needsProfile: false,
 			};
 		} finally {
 			this.render();
