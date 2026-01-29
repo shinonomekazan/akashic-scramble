@@ -28,15 +28,15 @@ plays/
 ```
 
 1. Placeはほぼマスターデータとして機能する
-	- 唯一、currentHoldPlayIdのみが更新される
+	- 唯一、currentHoldPlaceIdのみが更新される
 2. PlaceからHoldPlaceが生成され、一つの確保された枠を表現する
 3. HoldPlaceからPlayが生成され、一つのプレイを表現する
 4. PlayからPlayTokenが生成され、ユーザーのプレイ権を表現する
 
 子コレクションは現状ほぼ利用していない。ほぼ、単一フィールドインデックスで用途を網羅できそうなため。以下に代表的な検索方法を例示する。
 
-1. 自分のHold履歴を参照する: HoldPlaceのownerUserIdで検索
-2. 自分のPlay履歴を参照する: PlaceのownerUserIdで検索
+1. 自分のHold履歴を参照する: HoldPlaceのholdUserIdで検索
+2. 自分のPlay履歴を参照する: PlayのownerUserIdで検索
 3. そのPlaceのHoldPlaceの履歴を参照する: HoldPlaceのplaceIdで検索
 4. そのHoldPlaceのPlay履歴を参照する: PlayのholdPlaceIdで検索
 
@@ -48,14 +48,14 @@ plays/
 
 ### そのPlaceの状態を確認する
 
-PlaceのstateまたはcurrentHoldPlaceIdを参照する。
+PlaceのcurrentHoldPlaceIdを参照する。
 
 ### そのPlaceを確保（Hold）する
 
 1. Placeのbehavioursに応じてHoldPlaceを生成
-2. Placeのstateをholdingに変更し、PlaceのcurrentHoldPlaceIdに値を入れる
+2. PlaceのcurrentHoldPlaceIdに値を入れる
 
-### Playを開始する
+### Playを作成する
 
 1. HoldPlaceのbehavioursに応じてPlayを生成
 2. HoldPlaceのcurrentPlayIdに値を入れる
@@ -64,14 +64,16 @@ PlaceのstateまたはcurrentHoldPlaceIdを参照する。
 
 1. ユーザーのログイン状態と、PlayのownerUserId、PlayのdefaultPermissionを元にPlayTokenを作成
 
-### Playを開始する
+### プレイを開始する
 
 1. PlayのjoinedPlayerIdsを更新する
 2. Play Eventとしてjoinを発行
 
 後述するPlayの状態変化の監視で、joinedPlayerIdsの変化を監視しておけば、現在のJoinedPlayerの変化を検知することも可能。
 
-### Playを停止する
+※「プレイ」なのは誤字ではなく、Playに参加する = Playerになる事を意味し、JoinedPlayerとしてPlayに参加するを表す用語として現状は「プレイを開始」というのが使われているため。
+
+### プレイを停止する
 
 1. PlayのjoinedPlayerIdsを更新する
 2. Play Eventとしてleaveを発行
@@ -89,7 +91,7 @@ PlaceのstateまたはcurrentHoldPlaceIdを参照する。
 2. HoldPlaceのcurrentPlayIdの値の変化で、プレー状態を検知する
 3. HoldPlaceのendedAtの値の変化で、HoldPlaceの終了を検知する
 
-HoldPlaceであれば、Placeのwatchをしないようにすること。
+HoldPlaceを監視している際、Placeのwatchを不要なので、二重監視を避けるように実装する事。
 
 ### Playの状態変化を監視する
 
