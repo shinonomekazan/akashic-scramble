@@ -153,8 +153,9 @@ export interface Play {
 	/**
 	 * そのプレイに現在参加しているユーザーIDの一覧。
 	 * 履歴として残るものではない点に注意。
+	 * 正確にはJoinedPlayerUserIdsとなるが、冗長性を避けるため本名称としている。
 	 */
-	joinedUserIds: string[];
+	joinedPlayerIds: string[];
 
 	/**
 	 * そのプレイを見たUserのデフォルトパーミッション。
