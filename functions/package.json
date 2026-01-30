@@ -6,6 +6,7 @@
 		"serve": "npm run build && firebase emulators:start --only functions",
 		"shell": "npm run build && firebase functions:shell",
 		"start": "cross-env DOTENV_CONFIG_PATH=./.env.local node lib/start.js",
+		"generate:places": "ts-node ./scripts/generate-places-data.ts",
 		"format": "prettier --write .",
 		"deploy": "firebase deploy --only functions",
 		"logs": "firebase functions:log"
