@@ -206,7 +206,7 @@ export class App {
 		if (loading) {
 			gridOverlay = '<div class="top-grid-overlay">読み込み中...</div>';
 		} else if (error) {
-			gridOverlay = `<div class="top-grid-overlay is-error">${error}</div>`;
+			gridOverlay = `<div class="top-grid-overlay is-error">${utils.escapeHtml(error)}</div>`;
 		} else if (places.length === 0) {
 			gridOverlay = '<div class="top-grid-overlay">Placeがまだありません。</div>';
 		} else if (visiblePlaces.length === 0) {
@@ -225,7 +225,7 @@ export class App {
 								id="top-search-input"
 								type="text"
 								class="form-control"
-								value="${query}"
+								value="${utils.escapeHtml(query)}"
 								placeholder="Place名やIDで検索"
 								autocomplete="off"
 							/>
@@ -292,7 +292,7 @@ export class App {
 			<div class="top-place-card card h-100 ${selectedClass} is-${status}" data-x="${place.x}" data-y="${place.y}" style="grid-column:${col}; grid-row:${row};">
 				<div class="card-body p-3">
 					<div class="d-flex justify-content-between align-items-center mb-2">
-						<div class="fw-semibold">${place.name}</div>
+						<div class="fw-semibold">${utils.escapeHtml(place.name)}</div>
 						<span class="badge ${statusBadgeClass}">${statusLabel}</span>
 					</div>
 					<div class="small text-secondary">${statusText}</div>

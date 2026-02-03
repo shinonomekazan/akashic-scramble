@@ -51,3 +51,12 @@ export function navigateTo(path: string) {
 	history.pushState({}, "", url.toString());
 	window.dispatchEvent(new PopStateEvent("popstate"));
 }
+
+export function escapeHtml(value: string) {
+	return value
+		.replace(/&/g, "&amp;")
+		.replace(/</g, "&lt;")
+		.replace(/>/g, "&gt;")
+		.replace(/"/g, "&quot;")
+		.replace(/'/g, "&#39;");
+}

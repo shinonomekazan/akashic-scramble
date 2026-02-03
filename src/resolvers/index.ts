@@ -23,10 +23,10 @@ export async function getPlaces(firestore: Firestore): Promise<Place[]> {
 		const data = docSnap.data() as Place;
 		return {
 			id: docSnap.id,
-			x: data.x,
-			y: data.y,
+			x: typeof data.x === "number" ? data.x : 0,
+			y: typeof data.y === "number" ? data.y : 0,
 			name: data.name ?? docSnap.id,
-			behaviours: data.behaviours,
+			behaviours: data.behaviours ?? [],
 			currentHoldPlaceId: data.currentHoldPlaceId,
 		};
 	});
