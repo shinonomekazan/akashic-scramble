@@ -15,5 +15,9 @@ service cloud.firestore {
       allow read: if isOwner(userId);
       allow write: if isOwner(userId);
     }
+
+    match /places/{placeId} {
+      allow read: if true;
+    }
   }
 }

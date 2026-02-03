@@ -44,12 +44,19 @@ export function isStaticPath(pathname = window.location.pathname || "/") {
 }
 
 export function navigateTo(path: string) {
-	const url = new URL(location.href);
-	url.hash = "";
-	url.pathname = path;
+	const url = new URL(path, location.origin);
 	if (isDebugMode()) {
 		url.searchParams.set("debug", "true");
 	}
 	history.pushState({}, "", url.toString());
 	window.dispatchEvent(new PopStateEvent("popstate"));
+}
+
+export function escapeHtml(value: string) {
+	return value
+		.replace(/&/g, "&amp;")
+		.replace(/</g, "&lt;")
+		.replace(/>/g, "&gt;")
+		.replace(/"/g, "&quot;")
+		.replace(/'/g, "&#39;");
 }
