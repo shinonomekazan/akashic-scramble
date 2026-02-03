@@ -6,7 +6,8 @@ import { createUser, updateUser } from "./api/users";
 import { appConfig } from "./config";
 import type { AppConfig } from "./config.types";
 import { initializeFirebase, type FirebaseInstance } from "./firebase";
-import { getUser } from "./resolvers";
+import { getPlaces, getUser } from "./resolvers";
+import type { Place } from "./types/place";
 import type { User as FirestoreUser } from "./types";
 import * as utils from "./utils";
 import "./css/bootstrap.min.css";
@@ -20,6 +21,19 @@ type AuthState = {
 	needsProfile: boolean;
 };
 
+type PlaceStatus = "playing" | "idle";
+
+type TopState = {
+	places: Place[];
+	loading: boolean;
+	loaded: boolean;
+	error: string | null;
+	query: string;
+	zoom: number;
+	selectedCoord: { x: number; y: number } | null;
+	lastFocus: "search" | null;
+};
+
 export class App {
 	firebase: FirebaseInstance;
 	client: ApiClient;
@@ -27,6 +41,7 @@ export class App {
 	rootEl: HTMLElement;
 	toastEl: HTMLElement;
 	state: AuthState;
+	topState: TopState;
 
 	constructor(config: AppConfig = appConfig as AppConfig) {
 		this.config = config;
@@ -52,6 +67,24 @@ export class App {
 			profileLoaded: false,
 			profileLoading: false,
 			needsProfile: false,
+		};
+
+		const params = new URLSearchParams(location.search);
+		const zoomParam = Number.parseFloat(params.get("z") ?? "");
+		const zoom = Number.isFinite(zoomParam) ? zoomParam : 1;
+		const xParam = Number.parseInt(params.get("x") ?? "", 10);
+		const yParam = Number.parseInt(params.get("y") ?? "", 10);
+		const selectedCoord = Number.isFinite(xParam) && Number.isFinite(yParam) ? { x: xParam, y: yParam } : null;
+
+		this.topState = {
+			places: [],
+			loading: false,
+			loaded: false,
+			error: null,
+			query: "",
+			zoom,
+			selectedCoord,
+			lastFocus: null,
 		};
 	}
 
@@ -117,7 +150,7 @@ export class App {
 
 	renderLogin() {
 		if (this.state.user) {
-			utils.navigateTo("/my");
+			utils.navigateTo("/");
 			return;
 		}
 
@@ -149,12 +182,211 @@ export class App {
 			void this.loadUserProfile();
 		}
 
+		if (!this.topState.loaded && !this.topState.loading) {
+			void this.loadPlaces();
+		}
+
+		const { places, loading, error, query } = this.topState;
+		const normalizedQuery = query.trim().toLowerCase();
+		const gridMetrics = this.getGridMetrics(places);
+
+		const visiblePlaces = places.filter((place) => {
+			return (
+				!normalizedQuery ||
+				place.name.toLowerCase().includes(normalizedQuery) ||
+				place.id.toLowerCase().includes(normalizedQuery)
+			);
+		});
+
+		const placeCardsMarkup = visiblePlaces
+			.map((place) => this.renderTopPlaceCard(place, gridMetrics.minX, gridMetrics.minY))
+			.join("");
+
+		let gridOverlay = "";
+		if (loading) {
+			gridOverlay = '<div class="top-grid-overlay">読み込み中...</div>';
+		} else if (error) {
+			gridOverlay = `<div class="top-grid-overlay is-error">${error}</div>`;
+		} else if (places.length === 0) {
+			gridOverlay = '<div class="top-grid-overlay">Placeがまだありません。</div>';
+		} else if (visiblePlaces.length === 0) {
+			gridOverlay = '<div class="top-grid-overlay">条件に一致するPlaceがありません。</div>';
+		}
+
+		const menuMarkup = this.renderMenuMarkup(user, this.state.profile);
 		this.rootEl.innerHTML = `
-			<div class="min-vh-100 position-relative"></div>
-			${this.renderMenuMarkup(user, this.state.profile)}
+			<div class="top-page container py-5">
+				<div class="d-flex align-items-end justify-content-between flex-wrap gap-3 mb-3">
+					<h1 class="h4 m-0">プレイス一覧</h1>
+					<label class="d-flex flex-column gap-1">
+						<span class="form-label text-uppercase small text-muted m-0">検索</span>
+						<div class="input-group input-group-sm">
+							<input
+								id="top-search-input"
+								type="text"
+								class="form-control"
+								value="${query}"
+								placeholder="Place名やIDで検索"
+								autocomplete="off"
+							/>
+						</div>
+					</label>
+				</div>
+				<div class="top-grid-stage border rounded-3 p-3 bg-white position-relative">
+					<div class="top-grid" style="--cols:${gridMetrics.cols}; --rows:${gridMetrics.rows};">
+						${placeCardsMarkup}
+					</div>
+					${gridOverlay}
+				</div>
+			</div>
+			${menuMarkup}
 		`;
 
 		this.bindMenuEvents(user);
+		this.bindTopEvents();
+		this.restoreTopFocus();
+	}
+
+	getGridMetrics(places: Place[]) {
+		if (places.length === 0) {
+			return { minX: 0, minY: 0, cols: 1, rows: 1 };
+		}
+		const xs = places.map((place) => place.x);
+		const ys = places.map((place) => place.y);
+		const minX = Math.min(...xs);
+		const maxX = Math.max(...xs);
+		const minY = Math.min(...ys);
+		const maxY = Math.max(...ys);
+		return {
+			minX,
+			minY,
+			cols: maxX - minX + 1,
+			rows: maxY - minY + 1,
+		};
+	}
+
+	getPlaceStatus(place: Place): PlaceStatus {
+		return place.currentHoldPlaceId ? "playing" : "idle";
+	}
+
+	getHoldableMinutes(place: Place): number | null {
+		const behaviour = place.behaviours.find((item) => item.type === "holdableTime") as
+			| { type: "holdableTime"; time: number }
+			| undefined;
+		if (!behaviour || typeof behaviour.time !== "number") return null;
+		return Math.max(1, Math.round(behaviour.time / 60000));
+	}
+
+	renderTopPlaceCard(place: Place, minX: number, minY: number) {
+		const col = place.x - minX + 1;
+		const row = place.y - minY + 1;
+		const status = this.getPlaceStatus(place);
+		const statusLabel = status === "playing" ? "プレイ中" : "空き";
+		const statusText = status === "playing" ? "現在プレイ中" : "現在空き";
+		const holdMinutes = this.getHoldableMinutes(place);
+		const holdText = holdMinutes ? `保持 最大 ~${holdMinutes}分` : "保持 最大: 未設定";
+		const isSelected = this.topState.selectedCoord?.x === place.x && this.topState.selectedCoord?.y === place.y;
+		const statusBadgeClass = status === "playing" ? "bg-warning text-dark" : "bg-success";
+		const selectedClass = isSelected ? "border-dark border-2 shadow-sm" : "border";
+		return `
+			<div class="top-place-card card h-100 ${selectedClass} is-${status}" data-x="${place.x}" data-y="${place.y}" style="grid-column:${col}; grid-row:${row};">
+				<div class="card-body p-3">
+					<div class="d-flex justify-content-between align-items-center mb-2">
+						<div class="fw-semibold">${place.name}</div>
+						<span class="badge ${statusBadgeClass}">${statusLabel}</span>
+					</div>
+					<div class="small text-secondary">${statusText}</div>
+					<div class="small text-muted">${holdText}</div>
+				</div>
+			</div>
+		`;
+	}
+
+	updateTopUrl(next: { x?: number; y?: number }) {
+		const url = new URL(location.href);
+		if (typeof next.x === "number" && Number.isFinite(next.x)) {
+			url.searchParams.set("x", String(next.x));
+		} else {
+			url.searchParams.delete("x");
+		}
+		if (typeof next.y === "number" && Number.isFinite(next.y)) {
+			url.searchParams.set("y", String(next.y));
+		} else {
+			url.searchParams.delete("y");
+		}
+		if (Number.isFinite(this.topState.zoom)) {
+			url.searchParams.set("z", String(this.topState.zoom));
+		} else {
+			url.searchParams.set("z", "1");
+		}
+		if (utils.isDebugMode()) {
+			url.searchParams.set("debug", "true");
+		}
+		history.replaceState({}, "", url.toString());
+	}
+
+	async loadPlaces() {
+		if (this.topState.loading || this.topState.loaded) return;
+		this.topState = { ...this.topState, loading: true, error: null };
+		try {
+			const places = await getPlaces(this.firebase.firestore);
+			this.topState = {
+				...this.topState,
+				places,
+				loading: false,
+				loaded: true,
+				error: null,
+			};
+		} catch (err) {
+			const message = err instanceof Error ? err.message : "Placeの取得に失敗しました。";
+			this.topState = {
+				...this.topState,
+				loading: false,
+				loaded: true,
+				error: message,
+			};
+		} finally {
+			this.render();
+		}
+	}
+
+	bindTopEvents() {
+		const searchInput = this.rootEl.querySelector<HTMLInputElement>("#top-search-input");
+		if (!searchInput) return;
+		searchInput.addEventListener("input", () => {
+			this.topState = {
+				...this.topState,
+				query: searchInput.value,
+				lastFocus: "search",
+			};
+			this.render();
+		});
+
+		const placeCards = Array.from(this.rootEl.querySelectorAll<HTMLDivElement>(".top-place-card"));
+		placeCards.forEach((card) => {
+			const x = Number(card.dataset.x);
+			const y = Number(card.dataset.y);
+			if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+			card.addEventListener("click", () => {
+				this.topState = {
+					...this.topState,
+					selectedCoord: { x, y },
+				};
+				this.updateTopUrl({ x, y });
+				this.render();
+			});
+		});
+	}
+
+	restoreTopFocus() {
+		if (this.topState.lastFocus !== "search") return;
+		const searchInput = this.rootEl.querySelector<HTMLInputElement>("#top-search-input");
+		if (searchInput) {
+			searchInput.focus();
+			searchInput.selectionStart = searchInput.value.length;
+			searchInput.selectionEnd = searchInput.value.length;
+		}
+		this.topState.lastFocus = null;
 	}
 
 	getDefaultProfile(user: FirebaseUser): FirestoreUser {

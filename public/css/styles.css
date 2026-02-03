@@ -1,3 +1,5 @@
+@import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Syne:wght@600;700&display=swap");
+
 :root {
 	color-scheme: light;
 }
@@ -248,5 +250,55 @@ body {
 @media (max-width: 768px) {
 	.login-card {
 		max-width: 100%;
+	}
+}
+
+.top-page {
+	min-height: 100vh;
+	background: #ffffff;
+}
+
+.top-grid-stage {
+	min-height: 240px;
+	overflow: auto;
+}
+
+.top-grid {
+	display: grid;
+	grid-template-columns: repeat(var(--cols), minmax(160px, 1fr));
+	grid-template-rows: repeat(var(--rows), 140px);
+	gap: 12px;
+}
+
+.top-grid-overlay {
+	position: absolute;
+	inset: 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	background: rgba(255, 255, 255, 0.9);
+	color: #6b7280;
+	font-size: 14px;
+}
+
+.top-grid-overlay.is-error {
+	color: #b91c1c;
+}
+
+.top-place-card {
+	cursor: pointer;
+}
+
+.top-place-card.is-playing {
+	border-left: 4px solid #f97316 !important;
+}
+
+.top-place-card.is-idle {
+	border-left: 4px solid #22c55e !important;
+}
+
+@media (max-width: 600px) {
+	.top-grid {
+		grid-template-columns: repeat(var(--cols), minmax(140px, 1fr));
 	}
 }
