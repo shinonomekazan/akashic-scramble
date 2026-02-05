@@ -1,4 +1,3 @@
-import { App } from "../App";
 import { Context } from "../Context";
 import BaseController from "./BaseController";
 import * as validators from "express-validator";
@@ -13,10 +12,6 @@ interface IdParams {
 }
 
 export class PlacesController extends BaseController {
-	constructor(app: App) {
-		super(app);
-	}
-
 	register(basePath: string): Router {
 		const router = super.register(basePath);
 		this.registerRoute(router, "POST", "/:id/hold", this.hold, [
