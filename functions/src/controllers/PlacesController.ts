@@ -15,21 +15,6 @@ interface IdParams {
 export class PlacesController extends BaseController {
 	constructor(app: App) {
 		super(app);
-		this.routingMap.release = {
-			method: "POST",
-			path: "/:id/release",
-		};
-
-		this.validators.release = [
-			fw.params.InstantValidator(
-				[params.headerBearerTokenValidator(), validators.param("id").isString().notEmpty()],
-				(context) =>
-					({
-						authorization: context.req.headers.authorization,
-						id: context.req.params.id as string,
-					}) as IdParams,
-			),
-		];
 	}
 
 	register(basePath: string): Router {
