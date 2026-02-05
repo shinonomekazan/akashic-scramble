@@ -62,14 +62,14 @@ export function holdPlace(
 		const placeRef = firestore.collection("places").doc(input.placeId);
 		const placeSnap = await transaction.get(placeRef);
 		if (!placeSnap.exists) {
-			throw new fw.types.NotFound(`ID ${input.placeId} のPlaceが見つかりません`);
+			throw new fw.types.NotFound(`Place with id ${input.placeId} not found`);
 		}
 
 		const placeData = placeSnap.data() as Partial<Place>;
 		const currentHoldPlaceId =
 			typeof placeData.currentHoldPlaceId === "string" ? placeData.currentHoldPlaceId : undefined;
 		if (currentHoldPlaceId) {
-			throw new fw.types.Duplicate("Placeは既に保持されています");
+			throw new fw.types.Duplicate("Place is already held");
 		}
 
 		const behaviours = Array.isArray(placeData.behaviours) ? placeData.behaviours : [];
@@ -107,30 +107,29 @@ export function releaseHoldPlace(
 		const placeRef = firestore.collection("places").doc(input.placeId);
 		const placeSnap = await transaction.get(placeRef);
 		if (!placeSnap.exists) {
-			throw new fw.types.NotFound(`ID ${input.placeId} のPlaceが見つかりません`);
+			throw new fw.types.NotFound(`Place with id ${input.placeId} not found`);
 		}
 
 		const placeData = placeSnap.data() as Partial<Place>;
 		const currentHoldPlaceId =
 			typeof placeData.currentHoldPlaceId === "string" ? placeData.currentHoldPlaceId : undefined;
 		if (!currentHoldPlaceId) {
-			throw new fw.types.BadRequest("Placeは保持されていません");
+			throw new fw.types.BadRequest("Place is not held");
 		}
 
 		const holdPlaceRef = firestore.collection("holdPlaces").doc(currentHoldPlaceId);
 		const holdPlaceSnap = await transaction.get(holdPlaceRef);
 		if (!holdPlaceSnap.exists) {
-			throw new fw.types.NotFound(`ID ${currentHoldPlaceId} のHoldPlaceが見つかりません`);
+			throw new fw.types.NotFound(`HoldPlace with id ${currentHoldPlaceId} not found`);
 		}
 
 		const holdPlaceData = holdPlaceSnap.data() as Partial<HoldPlace>;
 		if (holdPlaceData.endedAt) {
-			throw new fw.types.Duplicate("HoldPlaceはすでに終了しております。");
+			throw new fw.types.Duplicate("HoldPlace is already ended");
 		}
-		const holdUserId = holdPlaceData.holdUserId;
-		const inputHoldUserId = input.holdUserId;
-		if ((holdUserId != null || inputHoldUserId != null) && holdUserId !== inputHoldUserId) {
-			throw new fw.types.Forbidden("HoldPlaceは別のユーザーによって所有されています");
+
+		if (holdPlaceData.holdUserId && holdPlaceData.holdUserId !== input.holdUserId) {
+			throw new fw.types.Forbidden("HoldPlace is owned by another user");
 		}
 
 		const now = Timestamp.now();
