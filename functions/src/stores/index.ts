@@ -1,8 +1,79 @@
 import { UserProfile } from "../types";
-import { Firestore, Timestamp, FieldValue } from "firebase-admin/firestore";
+import { Firestore, Timestamp, FieldValue, Transaction } from "firebase-admin/firestore";
 import { eraseUndefined } from "../utils";
 import * as fw from "../fw";
-import { HoldPlace, Place } from "../types/firestore";
+import { HoldPlace, Place, PlaceBehaviour } from "../types/firestore";
+
+function resolveHoldExpireAt(behaviours: PlaceBehaviour[], now: Timestamp) {
+	const holdableBehaviour = behaviours.find((behaviour) => behaviour.type === "holdableTime");
+	if (!holdableBehaviour) return undefined;
+	const time = (holdableBehaviour as { type: "holdableTime"; time: number }).time;
+	if (typeof time !== "number" || !Number.isFinite(time) || time <= 0) return undefined;
+	return Timestamp.fromMillis(now.toMillis() + time);
+}
+
+async function endHoldPlaceTransaction(
+	firestore: Firestore,
+	transaction: Transaction,
+	input: {
+		holdPlaceId: string;
+		holdUserId?: string;
+		requireOwner: boolean;
+		placeId?: string;
+		expireAtRequired?: Timestamp;
+		now?: Timestamp;
+		allowMissing?: boolean;
+		allowAlreadyEnded?: boolean;
+	},
+) {
+	const holdPlaceRef = firestore.collection("holdPlaces").doc(input.holdPlaceId);
+	const holdPlaceSnap = await transaction.get(holdPlaceRef);
+	if (!holdPlaceSnap.exists) {
+		if (input.allowMissing) return false;
+		throw new fw.types.NotFound(`HoldPlace with id ${input.holdPlaceId} not found`);
+	}
+
+	const holdPlaceData = holdPlaceSnap.data() as Partial<HoldPlace>;
+	if (holdPlaceData.endedAt) {
+		if (input.allowAlreadyEnded) return false;
+		throw new fw.types.Duplicate("HoldPlace is already ended");
+	}
+
+	if (input.requireOwner && holdPlaceData.holdUserId && holdPlaceData.holdUserId !== input.holdUserId) {
+		throw new fw.types.Forbidden("HoldPlace is owned by another user");
+	}
+
+	if (input.expireAtRequired) {
+		if (!holdPlaceData.expireAt) return false;
+		if (holdPlaceData.expireAt.toMillis() > input.expireAtRequired.toMillis()) return false;
+	}
+
+	const now = input.now ?? Timestamp.now();
+	const placeId = input.placeId ?? holdPlaceData.placeId;
+	if (placeId) {
+		const placeRef = firestore.collection("places").doc(placeId);
+		const placeSnap = await transaction.get(placeRef);
+		if (placeSnap.exists) {
+			const placeData = placeSnap.data() as Partial<Place>;
+			if (placeData.currentHoldPlaceId === holdPlaceRef.id) {
+				await transaction.update(placeRef, {
+					currentHoldPlaceId: FieldValue.delete(),
+					updatedAt: now,
+				});
+			}
+		}
+	}
+
+	await transaction.update(
+		holdPlaceRef,
+		eraseUndefined({
+			endedAt: now,
+			updatedAt: now,
+		}),
+	);
+
+	return true;
+}
 
 export function storeUser(firestore: Firestore, user: Omit<UserProfile, "createdAt" | "updatedAt">) {
 	return firestore.runTransaction(async (transaction) => {
@@ -40,7 +111,7 @@ export function updateUser(firestore: Firestore, user: Omit<UserProfile, "create
 		if (!snapshot.exists) {
 			throw new fw.types.NotFound(`User with id ${user.uid} not found`);
 		}
-		transaction.update(
+		await transaction.update(
 			userDoc,
 			eraseUndefined({
 				name: user.name,
@@ -79,6 +150,7 @@ export function holdPlace(
 			placeId: input.placeId,
 			behaviours,
 			holdUserId: input.holdUserId,
+			expireAt: resolveHoldExpireAt(behaviours, now),
 			createdAt: now,
 			updatedAt: now,
 		};
@@ -117,32 +189,31 @@ export function releaseHoldPlace(
 			throw new fw.types.BadRequest("Place is not held");
 		}
 
-		const holdPlaceRef = firestore.collection("holdPlaces").doc(currentHoldPlaceId);
-		const holdPlaceSnap = await transaction.get(holdPlaceRef);
-		if (!holdPlaceSnap.exists) {
-			throw new fw.types.NotFound(`HoldPlace with id ${currentHoldPlaceId} not found`);
-		}
+		await endHoldPlaceTransaction(firestore, transaction, {
+			holdPlaceId: currentHoldPlaceId,
+			holdUserId: input.holdUserId,
+			requireOwner: true,
+			placeId: input.placeId,
+			now: Timestamp.now(),
+		});
+	});
+}
 
-		const holdPlaceData = holdPlaceSnap.data() as Partial<HoldPlace>;
-		if (holdPlaceData.endedAt) {
-			throw new fw.types.Duplicate("HoldPlace is already ended");
-		}
-
-		if (holdPlaceData.holdUserId && holdPlaceData.holdUserId !== input.holdUserId) {
-			throw new fw.types.Forbidden("HoldPlace is owned by another user");
-		}
-
-		const now = Timestamp.now();
-		await transaction.update(
-			holdPlaceRef,
-			eraseUndefined({
-				endedAt: now,
-				updatedAt: now,
-			}),
-		);
-		await transaction.update(placeRef, {
-			currentHoldPlaceId: FieldValue.delete(),
-			updatedAt: now,
+export function expireHoldPlace(
+	firestore: Firestore,
+	input: {
+		holdPlaceId: string;
+		now: Timestamp;
+	},
+) {
+	return firestore.runTransaction(async (transaction) => {
+		await endHoldPlaceTransaction(firestore, transaction, {
+			holdPlaceId: input.holdPlaceId,
+			requireOwner: false,
+			expireAtRequired: input.now,
+			now: input.now,
+			allowMissing: true,
+			allowAlreadyEnded: true,
 		});
 	});
 }

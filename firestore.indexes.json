@@ -1,4 +1,19 @@
 {
-	"indexes": [],
+	"indexes": [
+		{
+			"collectionGroup": "holdPlaces",
+			"queryScope": "COLLECTION",
+			"fields": [
+				{
+					"fieldPath": "expireAt",
+					"order": "ASCENDING"
+				},
+				{
+					"fieldPath": "endedAt",
+					"order": "ASCENDING"
+				}
+			]
+		}
+	],
 	"fieldOverrides": []
 }
