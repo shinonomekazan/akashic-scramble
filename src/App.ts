@@ -2,11 +2,12 @@ import { connectAuthEmulator, type User as FirebaseUser } from "firebase/auth";
 import { connectFirestoreEmulator } from "firebase/firestore";
 import { signInWithGoogle, signOutCurrentUser, watchAuthChanges } from "./auth";
 import { Client as ApiClient } from "./api/client";
+import { holdPlace, releasePlace } from "./api/places";
 import { createUser, updateUser } from "./api/users";
 import { appConfig } from "./config";
 import type { AppConfig } from "./config.types";
 import { initializeFirebase, type FirebaseInstance } from "./firebase";
-import { getPlaces, getUser } from "./resolvers";
+import { getPlaces, getUser, watchPlace } from "./resolvers";
 import type { Place } from "./types/place";
 import type { User as FirestoreUser } from "./types";
 import * as utils from "./utils";
@@ -31,6 +32,13 @@ type TopState = {
 	query: string;
 	zoom: number;
 	selectedCoord: { x: number; y: number } | null;
+	selectedPlace: Place | null;
+	selectedPlaceLoading: boolean;
+	selectedPlaceError: string | null;
+	holdSubmitting: boolean;
+	holdSubmittingPlaceId: string | null;
+	releaseSubmitting: boolean;
+	releaseSubmittingPlaceId: string | null;
 	lastFocus: "search" | null;
 };
 
@@ -42,6 +50,8 @@ export class App {
 	toastEl: HTMLElement;
 	state: AuthState;
 	topState: TopState;
+	placeWatchUnsub: (() => void) | null;
+	placeWatchId: string | null;
 
 	constructor(config: AppConfig = appConfig as AppConfig) {
 		this.config = config;
@@ -84,8 +94,18 @@ export class App {
 			query: "",
 			zoom,
 			selectedCoord,
+			selectedPlace: null,
+			selectedPlaceLoading: false,
+			selectedPlaceError: null,
+			holdSubmitting: false,
+			holdSubmittingPlaceId: null,
+			releaseSubmitting: false,
+			releaseSubmittingPlaceId: null,
 			lastFocus: null,
 		};
+
+		this.placeWatchUnsub = null;
+		this.placeWatchId = null;
 	}
 
 	main() {
@@ -129,6 +149,9 @@ export class App {
 		}
 
 		const route = utils.parseRoute();
+		if (route.name !== "top") {
+			this.stopSelectedPlaceWatch();
+		}
 		switch (route.name) {
 			case "login":
 				this.renderLogin();
@@ -186,6 +209,7 @@ export class App {
 			void this.loadPlaces();
 		}
 
+		this.syncSelectedPlaceWatch();
 		const { places, loading, error, query } = this.topState;
 		const normalizedQuery = query.trim().toLowerCase();
 		const gridMetrics = this.getGridMetrics(places);
@@ -214,6 +238,7 @@ export class App {
 		}
 
 		const menuMarkup = this.renderMenuMarkup(user, this.state.profile);
+		const selectedPlaceMarkup = this.renderSelectedPlacePanel();
 		this.rootEl.innerHTML = `
 			<div class="top-page container py-5">
 				<div class="d-flex align-items-end justify-content-between flex-wrap gap-3 mb-3">
@@ -238,6 +263,7 @@ export class App {
 					</div>
 					${gridOverlay}
 				</div>
+				${selectedPlaceMarkup}
 			</div>
 			${menuMarkup}
 		`;
@@ -281,8 +307,8 @@ export class App {
 		const col = place.x - minX + 1;
 		const row = place.y - minY + 1;
 		const status = this.getPlaceStatus(place);
-		const statusLabel = status === "playing" ? "プレイ中" : "空き";
-		const statusText = status === "playing" ? "現在プレイ中" : "現在空き";
+		const statusLabel = status === "playing" ? "確保済" : "空き地";
+		const statusText = status === "playing" ? "現在確保済み" : "現在空き地";
 		const holdMinutes = this.getHoldableMinutes(place);
 		const holdText = holdMinutes ? `保持 最大 ~${holdMinutes}分` : "保持 最大: 未設定";
 		const isSelected = this.topState.selectedCoord?.x === place.x && this.topState.selectedCoord?.y === place.y;
@@ -300,6 +326,244 @@ export class App {
 				</div>
 			</div>
 		`;
+	}
+
+	renderSelectedPlacePanel() {
+		if (!this.topState.selectedCoord) {
+			return "";
+		}
+
+		const { selectedPlace, selectedPlaceLoading, selectedPlaceError } = this.topState;
+		let bodyMarkup = "";
+
+		if (selectedPlaceLoading) {
+			bodyMarkup = '<div class="text-muted">読み込み中...</div>';
+		} else if (selectedPlaceError) {
+			bodyMarkup = `<div class="text-danger small">${utils.escapeHtml(selectedPlaceError)}</div>`;
+		} else if (!selectedPlace) {
+			bodyMarkup = '<div class="text-muted">選択したPlaceが見つかりません。</div>';
+		} else {
+			const status = this.getPlaceStatus(selectedPlace);
+			const statusLabel = status === "playing" ? "確保済" : "空き地";
+			const statusText = status === "playing" ? "現在確保済み" : "現在空き地";
+			const statusBadgeClass = status === "playing" ? "bg-warning text-dark" : "bg-success";
+			const holdMinutes = this.getHoldableMinutes(selectedPlace);
+			const holdText = holdMinutes ? `保持 最大 ~${holdMinutes}分` : "保持 最大: 未設定";
+			const isHoldable = status === "idle";
+			const isReleasable = status === "playing";
+			const isHoldSubmitting =
+				this.topState.holdSubmitting && this.topState.holdSubmittingPlaceId === selectedPlace.id;
+			const isReleaseSubmitting =
+				this.topState.releaseSubmitting && this.topState.releaseSubmittingPlaceId === selectedPlace.id;
+			const holdButtonLabel = isHoldSubmitting ? "確保中" : "確保する";
+			const releaseButtonLabel = isReleaseSubmitting ? "解放中" : "解放する";
+			bodyMarkup = `
+				<div class="d-flex justify-content-between align-items-center mb-2">
+					<div>
+						<div class="small text-muted">選択中のPlace</div>
+						<div class="fw-semibold">${utils.escapeHtml(selectedPlace.name)}</div>
+						<div class="small text-muted">ID: ${utils.escapeHtml(selectedPlace.id)}</div>
+					</div>
+					<span class="badge ${statusBadgeClass}">${statusLabel}</span>
+				</div>
+				<div class="small text-secondary">${statusText}</div>
+				<div class="small text-muted">${holdText}</div>
+				${
+					isHoldable
+						? `<div class="mt-3 text-center"><button id="place-hold-button" class="btn btn-primary" data-place-id="${utils.escapeHtml(
+								selectedPlace.id,
+							)}" ${isHoldSubmitting ? "disabled" : ""}>${holdButtonLabel}</button></div>`
+						: ""
+				}
+				${
+					isReleasable
+						? `<div class="mt-3 text-center"><button id="place-release-button" class="btn btn-outline-secondary" data-place-id="${utils.escapeHtml(
+								selectedPlace.id,
+							)}" ${isReleaseSubmitting ? "disabled" : ""}>${releaseButtonLabel}</button></div>`
+						: ""
+				}
+			`;
+		}
+
+		return `
+			<div class="card mt-3">
+				<div class="card-body">
+					${bodyMarkup}
+				</div>
+			</div>
+		`;
+	}
+
+	getSelectedPlaceFromState() {
+		const selectedCoord = this.topState.selectedCoord;
+		if (!selectedCoord) return null;
+		return (
+			this.topState.places.find((place) => place.x === selectedCoord.x && place.y === selectedCoord.y) ?? null
+		);
+	}
+
+	stopSelectedPlaceWatch() {
+		if (this.placeWatchUnsub) {
+			this.placeWatchUnsub();
+		}
+		this.placeWatchUnsub = null;
+		this.placeWatchId = null;
+	}
+
+	syncSelectedPlaceWatch() {
+		if (!this.topState.selectedCoord) {
+			if (this.placeWatchId) {
+				this.stopSelectedPlaceWatch();
+			}
+			if (
+				this.topState.selectedPlace ||
+				this.topState.selectedPlaceLoading ||
+				this.topState.selectedPlaceError
+			) {
+				this.topState = {
+					...this.topState,
+					selectedPlace: null,
+					selectedPlaceLoading: false,
+					selectedPlaceError: null,
+				};
+			}
+			return;
+		}
+
+		if (!this.topState.loaded) {
+			if (!this.topState.selectedPlaceLoading) {
+				this.topState = {
+					...this.topState,
+					selectedPlace: null,
+					selectedPlaceLoading: true,
+					selectedPlaceError: null,
+				};
+			}
+			return;
+		}
+
+		const selectedPlace = this.getSelectedPlaceFromState();
+		if (!selectedPlace) {
+			this.stopSelectedPlaceWatch();
+			this.topState = {
+				...this.topState,
+				selectedPlace: null,
+				selectedPlaceLoading: false,
+				selectedPlaceError: "選択したPlaceが見つかりません。",
+			};
+			return;
+		}
+
+		if (this.placeWatchId === selectedPlace.id) {
+			if (!this.topState.selectedPlace || this.topState.selectedPlace.id !== selectedPlace.id) {
+				this.topState = {
+					...this.topState,
+					selectedPlace,
+					selectedPlaceLoading: false,
+					selectedPlaceError: null,
+				};
+			}
+			return;
+		}
+
+		this.stopSelectedPlaceWatch();
+
+		const watchId = selectedPlace.id;
+		this.placeWatchId = watchId;
+		this.topState = {
+			...this.topState,
+			selectedPlace,
+			selectedPlaceLoading: true,
+			selectedPlaceError: null,
+		};
+
+		this.placeWatchUnsub = watchPlace(
+			this.firebase.firestore,
+			watchId,
+			(place) => {
+				if (this.placeWatchId !== watchId) return;
+				if (!place) {
+					this.topState = {
+						...this.topState,
+						selectedPlace: null,
+						selectedPlaceLoading: false,
+						selectedPlaceError: "選択したPlaceが見つかりません。",
+					};
+					this.render();
+					return;
+				}
+				const nextPlaces = this.topState.places.map((item) => (item.id === place.id ? place : item));
+				this.topState = {
+					...this.topState,
+					places: nextPlaces,
+					selectedPlace: place,
+					selectedPlaceLoading: false,
+					selectedPlaceError: null,
+				};
+				this.render();
+			},
+			() => {
+				if (this.placeWatchId !== watchId) return;
+				this.topState = {
+					...this.topState,
+					selectedPlaceLoading: false,
+					selectedPlaceError: "Placeの監視に失敗しました。",
+				};
+				this.render();
+			},
+		);
+	}
+
+	async handleHoldPlace(placeId: string) {
+		if (this.topState.holdSubmitting) return;
+		this.topState = {
+			...this.topState,
+			holdSubmitting: true,
+			holdSubmittingPlaceId: placeId,
+		};
+		this.render();
+		try {
+			await holdPlace(this.client, placeId);
+			this.showToast("確保しました。", "success");
+		} catch (err) {
+			const message = err instanceof Error ? err.message : "確保に失敗しました。";
+			this.showToast(message, "error");
+		} finally {
+			if (this.topState.holdSubmittingPlaceId === placeId) {
+				this.topState = {
+					...this.topState,
+					holdSubmitting: false,
+					holdSubmittingPlaceId: null,
+				};
+				this.render();
+			}
+		}
+	}
+
+	async handleReleasePlace(placeId: string) {
+		if (this.topState.releaseSubmitting) return;
+		this.topState = {
+			...this.topState,
+			releaseSubmitting: true,
+			releaseSubmittingPlaceId: placeId,
+		};
+		this.render();
+		try {
+			await releasePlace(this.client, placeId);
+			this.showToast("解放しました。", "success");
+		} catch (err) {
+			const message = err instanceof Error ? err.message : "解放に失敗しました。";
+			this.showToast(message, "error");
+		} finally {
+			if (this.topState.releaseSubmittingPlaceId === placeId) {
+				this.topState = {
+					...this.topState,
+					releaseSubmitting: false,
+					releaseSubmittingPlaceId: null,
+				};
+				this.render();
+			}
+		}
 	}
 
 	updateTopUrl(next: { x?: number; y?: number }) {
@@ -376,6 +640,24 @@ export class App {
 				this.render();
 			});
 		});
+
+		const holdButton = this.rootEl.querySelector<HTMLButtonElement>("#place-hold-button");
+		if (holdButton) {
+			holdButton.addEventListener("click", () => {
+				const placeId = holdButton.dataset.placeId;
+				if (!placeId) return;
+				void this.handleHoldPlace(placeId);
+			});
+		}
+
+		const releaseButton = this.rootEl.querySelector<HTMLButtonElement>("#place-release-button");
+		if (releaseButton) {
+			releaseButton.addEventListener("click", () => {
+				const placeId = releaseButton.dataset.placeId;
+				if (!placeId) return;
+				void this.handleReleasePlace(placeId);
+			});
+		}
 	}
 
 	restoreTopFocus() {
