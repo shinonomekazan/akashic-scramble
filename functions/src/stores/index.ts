@@ -2,12 +2,17 @@ import { UserProfile } from "../types";
 import { Firestore, Timestamp, FieldValue, Transaction } from "firebase-admin/firestore";
 import { eraseUndefined } from "../utils";
 import * as fw from "../fw";
-import { HoldPlace, Place, PlaceBehaviour } from "../types/firestore";
+import { HoldPlace, Place, PlaceBehaviour, PlaceHoldableTimeBehaviour } from "../types/firestore";
+
+// PlaceBehaviour から holdableTime バリアントを絞り込むための型ガード
+function isPlaceHoldableTimeBehaviour(behaviour: PlaceBehaviour): behaviour is PlaceHoldableTimeBehaviour {
+	return behaviour.type === "holdableTime";
+}
 
 function resolveHoldExpireAt(behaviours: PlaceBehaviour[], now: Timestamp) {
-	const holdableBehaviour = behaviours.find((behaviour) => behaviour.type === "holdableTime");
+	const holdableBehaviour = behaviours.find(isPlaceHoldableTimeBehaviour);
 	if (!holdableBehaviour) return undefined;
-	const time = (holdableBehaviour as { type: "holdableTime"; time: number }).time;
+	const time = holdableBehaviour.time;
 	if (typeof time !== "number" || !Number.isFinite(time) || time <= 0) return undefined;
 	return Timestamp.fromMillis(now.toMillis() + time);
 }
@@ -34,7 +39,7 @@ async function endHoldPlaceTransaction(
 	}
 
 	const holdPlaceData = holdPlaceSnap.data() as Partial<HoldPlace>;
-	if (holdPlaceData.endedAt) {
+	if (holdPlaceData.endedAt != null) {
 		if (input.allowAlreadyEnded) return false;
 		throw new fw.types.Duplicate("HoldPlace is already ended");
 	}
