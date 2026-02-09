@@ -12,7 +12,7 @@ const fallbackEnv = {
 
 function resolveEnv(key: keyof typeof fallbackEnv): string {
 	const value = process.env[key] ?? fallbackEnv[key];
-	if (!value || value === "undefined") {
+	if (!value) {
 		throw new Error(`${key} が設定されていません`);
 	}
 	return value;
