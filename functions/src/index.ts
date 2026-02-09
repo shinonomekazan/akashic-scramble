@@ -66,12 +66,7 @@ export const expireHoldPlaces = onSchedule({ region: "asia-northeast1", schedule
 	const adminApp = getFirebaseApp();
 	const firestore = getFirestore(adminApp);
 	const now = Timestamp.now();
-	const snapshot = await firestore
-		.collection("holdPlaces")
-		.where("expireAt", "<=", now)
-		.where("endedAt", "==", null)
-		.limit(50)
-		.get();
+	const snapshot = await firestore.collection("holdPlaces").where("expireAt", "<=", now).limit(50).get();
 
 	if (snapshot.empty) return;
 
