@@ -34,7 +34,7 @@ export function configure(): AppConfig {
 		apiConfig: {
 			baseUrl: `https://api-37ei3sbwpa-an.a.run.app`,
 			emulatorBaseUrl: `http://127.0.0.1:5001/${projectId}/${functionsRegion}/api`,
-			apiKey: "745bd08b-0b2d-45a5-8b3d-714b264b6221",
+			apiKey: "7b853cb9-f429-4a5f-ace2-3373b0104e16",
 		},
 	};
 }
