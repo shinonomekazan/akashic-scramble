@@ -7,7 +7,8 @@ import { createUser, updateUser } from "./api/users";
 import { appConfig } from "./config";
 import type { AppConfig } from "./config.types";
 import { initializeFirebase, type FirebaseInstance } from "./firebase";
-import { getPlaces, getUser, watchPlace } from "./resolvers";
+import { getPlaces, getUser, watchHoldPlace, watchPlace } from "./resolvers";
+import type { HoldPlace } from "./types/holdPlace";
 import type { Place } from "./types/place";
 import type { User as FirestoreUser } from "./types";
 import * as utils from "./utils";
@@ -35,6 +36,10 @@ type TopState = {
 	selectedPlace: Place | null;
 	selectedPlaceLoading: boolean;
 	selectedPlaceError: string | null;
+	selectedHoldPlace: HoldPlace | null;
+	selectedHoldPlaceLoading: boolean;
+	selectedHoldPlaceError: string | null;
+	ignoreHoldPlaceId: string | null;
 	holdSubmitting: boolean;
 	holdSubmittingPlaceId: string | null;
 	releaseSubmitting: boolean;
@@ -52,6 +57,8 @@ export class App {
 	topState: TopState;
 	placeWatchUnsub: (() => void) | null;
 	placeWatchId: string | null;
+	holdPlaceWatchUnsub: (() => void) | null;
+	holdPlaceWatchId: string | null;
 
 	constructor(config: AppConfig = appConfig as AppConfig) {
 		this.config = config;
@@ -97,6 +104,10 @@ export class App {
 			selectedPlace: null,
 			selectedPlaceLoading: false,
 			selectedPlaceError: null,
+			selectedHoldPlace: null,
+			selectedHoldPlaceLoading: false,
+			selectedHoldPlaceError: null,
+			ignoreHoldPlaceId: null,
 			holdSubmitting: false,
 			holdSubmittingPlaceId: null,
 			releaseSubmitting: false,
@@ -106,6 +117,8 @@ export class App {
 
 		this.placeWatchUnsub = null;
 		this.placeWatchId = null;
+		this.holdPlaceWatchUnsub = null;
+		this.holdPlaceWatchId = null;
 	}
 
 	main() {
@@ -151,6 +164,7 @@ export class App {
 		const route = utils.parseRoute();
 		if (route.name !== "top") {
 			this.stopSelectedPlaceWatch();
+			this.stopSelectedHoldPlaceWatch();
 		}
 		switch (route.name) {
 			case "login":
@@ -349,14 +363,34 @@ export class App {
 			const statusBadgeClass = status === "playing" ? "bg-warning text-dark" : "bg-success";
 			const holdMinutes = this.getHoldableMinutes(selectedPlace);
 			const holdText = holdMinutes ? `保持 最大 ~${holdMinutes}分` : "保持 最大: 未設定";
+			const holdPlace = this.topState.selectedHoldPlace;
+			const holdPlaceLoading = this.topState.selectedHoldPlaceLoading;
+			const holdPlaceError = this.topState.selectedHoldPlaceError;
+			const currentUserId = this.state.user?.uid ?? null;
+			const holdOwnerId = holdPlace?.holdUserId;
+			const isSelfHolding = status === "playing" && !!currentUserId && holdOwnerId === currentUserId;
 			const isHoldable = status === "idle";
-			const isReleasable = status === "playing";
+			const isReleasable = status === "playing" && isSelfHolding;
 			const isHoldSubmitting =
 				this.topState.holdSubmitting && this.topState.holdSubmittingPlaceId === selectedPlace.id;
 			const isReleaseSubmitting =
 				this.topState.releaseSubmitting && this.topState.releaseSubmittingPlaceId === selectedPlace.id;
 			const holdButtonLabel = isHoldSubmitting ? "確保中" : "確保する";
 			const releaseButtonLabel = isReleaseSubmitting ? "解放中" : "解放する";
+			let ownerLabel = "";
+			if (status === "playing") {
+				if (holdPlaceLoading) {
+					ownerLabel = "確保者を確認中...";
+				} else if (holdPlaceError) {
+					ownerLabel = "確保者の取得に失敗しました。";
+				} else if (isSelfHolding) {
+					ownerLabel = "自分が確保済";
+				} else if (holdOwnerId) {
+					ownerLabel = "他のユーザーが確保済";
+				} else {
+					ownerLabel = "システムが確保済";
+				}
+			}
 			bodyMarkup = `
 				<div class="d-flex justify-content-between align-items-center mb-2">
 					<div>
@@ -368,6 +402,7 @@ export class App {
 				</div>
 				<div class="small text-secondary">${statusText}</div>
 				<div class="small text-muted">${holdText}</div>
+				${ownerLabel ? `<div class="small text-muted">${utils.escapeHtml(ownerLabel)}</div>` : ""}
 				${
 					isHoldable
 						? `<div class="mt-3 text-center"><button id="place-hold-button" class="btn btn-primary" data-place-id="${utils.escapeHtml(
@@ -410,21 +445,35 @@ export class App {
 		this.placeWatchId = null;
 	}
 
+	stopSelectedHoldPlaceWatch() {
+		if (this.holdPlaceWatchUnsub) {
+			this.holdPlaceWatchUnsub();
+		}
+		this.holdPlaceWatchUnsub = null;
+		this.holdPlaceWatchId = null;
+	}
+
 	syncSelectedPlaceWatch() {
 		if (!this.topState.selectedCoord) {
-			if (this.placeWatchId) {
-				this.stopSelectedPlaceWatch();
-			}
+			if (this.placeWatchId) this.stopSelectedPlaceWatch();
+			if (this.holdPlaceWatchId) this.stopSelectedHoldPlaceWatch();
 			if (
 				this.topState.selectedPlace ||
 				this.topState.selectedPlaceLoading ||
-				this.topState.selectedPlaceError
+				this.topState.selectedPlaceError ||
+				this.topState.selectedHoldPlace ||
+				this.topState.selectedHoldPlaceLoading ||
+				this.topState.selectedHoldPlaceError
 			) {
 				this.topState = {
 					...this.topState,
 					selectedPlace: null,
 					selectedPlaceLoading: false,
 					selectedPlaceError: null,
+					selectedHoldPlace: null,
+					selectedHoldPlaceLoading: false,
+					selectedHoldPlaceError: null,
+					ignoreHoldPlaceId: null,
 				};
 			}
 			return;
@@ -445,13 +494,138 @@ export class App {
 		const selectedPlace = this.getSelectedPlaceFromState();
 		if (!selectedPlace) {
 			this.stopSelectedPlaceWatch();
+			this.stopSelectedHoldPlaceWatch();
 			this.topState = {
 				...this.topState,
 				selectedPlace: null,
 				selectedPlaceLoading: false,
 				selectedPlaceError: "選択したPlaceが見つかりません。",
+				selectedHoldPlace: null,
+				selectedHoldPlaceLoading: false,
+				selectedHoldPlaceError: null,
 			};
 			return;
+		}
+
+		let holdPlaceId = selectedPlace.currentHoldPlaceId;
+		if (holdPlaceId && holdPlaceId === this.topState.ignoreHoldPlaceId) {
+			holdPlaceId = undefined;
+		}
+		if (holdPlaceId) {
+			if (this.placeWatchId) this.stopSelectedPlaceWatch();
+			if (this.holdPlaceWatchId === holdPlaceId) {
+				if (!this.topState.selectedPlace || this.topState.selectedPlace.id !== selectedPlace.id) {
+					this.topState = {
+						...this.topState,
+						selectedPlace,
+						selectedPlaceLoading: false,
+						selectedPlaceError: null,
+					};
+				}
+				return;
+			}
+
+			this.stopSelectedHoldPlaceWatch();
+			this.holdPlaceWatchId = holdPlaceId;
+			this.topState = {
+				...this.topState,
+				selectedPlace,
+				selectedPlaceLoading: false,
+				selectedPlaceError: null,
+				selectedHoldPlace: null,
+				selectedHoldPlaceLoading: true,
+				selectedHoldPlaceError: null,
+			};
+
+			const watchHoldId = holdPlaceId;
+			const watchPlaceId = selectedPlace.id;
+			this.holdPlaceWatchUnsub = watchHoldPlace(
+				this.firebase.firestore,
+				watchHoldId,
+				(holdPlace) => {
+					if (this.holdPlaceWatchId !== watchHoldId) return;
+					if (!holdPlace) {
+						const nextPlaces = this.topState.places.map((item) =>
+							item.id === watchPlaceId ? { ...item, currentHoldPlaceId: undefined } : item,
+						);
+						this.topState = {
+							...this.topState,
+							ignoreHoldPlaceId: watchHoldId,
+							places: nextPlaces,
+							selectedHoldPlace: null,
+							selectedHoldPlaceLoading: false,
+							selectedHoldPlaceError: "HoldPlaceが見つかりません。",
+							selectedPlace: {
+								...selectedPlace,
+								currentHoldPlaceId: undefined,
+							},
+						};
+						this.stopSelectedHoldPlaceWatch();
+						this.render();
+						return;
+					}
+
+					if (holdPlace.endedAt) {
+						const nextPlaces = this.topState.places.map((item) =>
+							item.id === watchPlaceId ? { ...item, currentHoldPlaceId: undefined } : item,
+						);
+						this.topState = {
+							...this.topState,
+							ignoreHoldPlaceId: watchHoldId,
+							places: nextPlaces,
+							selectedHoldPlace: holdPlace,
+							selectedHoldPlaceLoading: false,
+							selectedHoldPlaceError: null,
+							selectedPlace: {
+								...selectedPlace,
+								currentHoldPlaceId: undefined,
+							},
+						};
+						this.stopSelectedHoldPlaceWatch();
+						this.render();
+						return;
+					}
+
+					const nextPlaces = this.topState.places.map((item) =>
+						item.id === watchPlaceId ? { ...item, currentHoldPlaceId: watchHoldId } : item,
+					);
+					this.topState = {
+						...this.topState,
+						places: nextPlaces,
+						selectedPlace,
+						selectedHoldPlace: holdPlace,
+						selectedHoldPlaceLoading: false,
+						selectedHoldPlaceError: null,
+					};
+					this.render();
+				},
+				() => {
+					if (this.holdPlaceWatchId !== watchHoldId) return;
+					this.topState = {
+						...this.topState,
+						selectedHoldPlaceLoading: false,
+						selectedHoldPlaceError: "HoldPlaceの監視に失敗しました。",
+					};
+					this.render();
+				},
+			);
+			return;
+		}
+
+		if (this.holdPlaceWatchId) {
+			this.stopSelectedHoldPlaceWatch();
+		}
+		if (
+			this.topState.selectedHoldPlace ||
+			this.topState.selectedHoldPlaceError ||
+			this.topState.selectedHoldPlaceLoading
+		) {
+			this.topState = {
+				...this.topState,
+				selectedHoldPlace: null,
+				selectedHoldPlaceLoading: false,
+				selectedHoldPlaceError: null,
+			};
 		}
 
 		if (this.placeWatchId === selectedPlace.id) {
@@ -492,6 +666,10 @@ export class App {
 					this.render();
 					return;
 				}
+				let nextIgnoreHoldPlaceId = this.topState.ignoreHoldPlaceId;
+				if (nextIgnoreHoldPlaceId && place.currentHoldPlaceId !== nextIgnoreHoldPlaceId) {
+					nextIgnoreHoldPlaceId = null;
+				}
 				const nextPlaces = this.topState.places.map((item) => (item.id === place.id ? place : item));
 				this.topState = {
 					...this.topState,
@@ -499,6 +677,7 @@ export class App {
 					selectedPlace: place,
 					selectedPlaceLoading: false,
 					selectedPlaceError: null,
+					ignoreHoldPlaceId: nextIgnoreHoldPlaceId,
 				};
 				this.render();
 			},
@@ -551,6 +730,25 @@ export class App {
 		try {
 			await releasePlace(this.client, placeId);
 			this.showToast("解放しました。", "success");
+			const currentHoldPlaceId = this.topState.selectedPlace?.currentHoldPlaceId;
+			if (currentHoldPlaceId) {
+				this.stopSelectedHoldPlaceWatch();
+				const nextPlaces = this.topState.places.map((item) =>
+					item.id === placeId ? { ...item, currentHoldPlaceId: undefined } : item,
+				);
+				this.topState = {
+					...this.topState,
+					places: nextPlaces,
+					selectedPlace: this.topState.selectedPlace
+						? { ...this.topState.selectedPlace, currentHoldPlaceId: undefined }
+						: this.topState.selectedPlace,
+					selectedHoldPlace: null,
+					selectedHoldPlaceLoading: false,
+					selectedHoldPlaceError: null,
+					ignoreHoldPlaceId: currentHoldPlaceId,
+				};
+				this.render();
+			}
 		} catch (err) {
 			const message = err instanceof Error ? err.message : "解放に失敗しました。";
 			this.showToast(message, "error");

@@ -19,5 +19,9 @@ service cloud.firestore {
     match /places/{placeId} {
       allow read: if true;
     }
+
+    match /holdPlaces/{holdPlaceId} {
+      allow read: if true;
+    }
   }
 }
