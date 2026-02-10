@@ -48,14 +48,14 @@ async function endHoldPlaceTransaction(
 		throw new fw.types.Forbidden("HoldPlace is owned by another user");
 	}
 
-	if (input.expireAtRequired) {
-		if (!holdPlaceData.expireAt) return false;
+	if (input.expireAtRequired != null) {
+		if (holdPlaceData.expireAt === undefined) return false;
 		if (holdPlaceData.expireAt.toMillis() > input.expireAtRequired.toMillis()) return false;
 	}
 
 	const now = input.now ?? Timestamp.now();
 	const placeId = input.placeId ?? holdPlaceData.placeId;
-	if (placeId) {
+	if (placeId != undefined) {
 		const placeRef = firestore.collection("places").doc(placeId);
 		const placeSnap = await transaction.get(placeRef);
 		if (placeSnap.exists) {
