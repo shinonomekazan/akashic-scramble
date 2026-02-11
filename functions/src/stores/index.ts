@@ -73,6 +73,7 @@ async function endHoldPlaceTransaction(
 		holdPlaceRef,
 		eraseUndefined({
 			endedAt: now,
+			expireAt: FieldValue.delete(),
 			updatedAt: now,
 		}),
 	);

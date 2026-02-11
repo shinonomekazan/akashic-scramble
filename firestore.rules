@@ -19,5 +19,11 @@ service cloud.firestore {
     match /places/{placeId} {
       allow read: if true;
     }
+
+    match /holdPlaces/{holdPlaceId} {
+      allow get: if request.auth != null;
+      allow list: if request.auth != null && resource.data.holdUserId == request.auth.uid;
+    }
+
   }
 }

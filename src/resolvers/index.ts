@@ -1,4 +1,5 @@
 import { collection, doc, getDoc, getDocs, onSnapshot, type Firestore, type Unsubscribe } from "firebase/firestore";
+import type { HoldPlace } from "../types/holdPlace";
 import type { Place, PlaceBehaviour } from "../types/place";
 import type { User } from "../types";
 
@@ -10,6 +11,18 @@ function normalizePlace(id: string, data: Partial<Place> | undefined): Place {
 		name: data?.name ?? id,
 		behaviours: Array.isArray(data?.behaviours) ? (data.behaviours as PlaceBehaviour[]) : [],
 		currentHoldPlaceId: typeof data?.currentHoldPlaceId === "string" ? data.currentHoldPlaceId : undefined,
+	};
+}
+
+function normalizeHoldPlace(id: string, data: Partial<HoldPlace> | undefined): HoldPlace {
+	return {
+		id,
+		placeId: data?.placeId ?? "",
+		behaviours: Array.isArray(data?.behaviours) ? (data.behaviours as PlaceBehaviour[]) : [],
+		holdUserId: typeof data?.holdUserId === "string" ? data.holdUserId : undefined,
+		currentPlayId: typeof data?.currentPlayId === "string" ? data.currentPlayId : undefined,
+		expireAt: data?.expireAt,
+		endedAt: data?.endedAt,
 	};
 }
 
@@ -52,6 +65,33 @@ export function watchPlace(
 			}
 			const data = snapshot.data() as Partial<Place>;
 			onChange(normalizePlace(snapshot.id, data));
+		},
+		(error) => {
+			if (onError) {
+				onError(error);
+			} else {
+				console.error(error);
+			}
+		},
+	);
+}
+
+export function watchHoldPlace(
+	firestore: Firestore,
+	holdPlaceId: string,
+	onChange: (holdPlace: HoldPlace | null) => void,
+	onError?: (error: Error) => void,
+): Unsubscribe {
+	const holdPlaceRef = doc(firestore, "holdPlaces", holdPlaceId);
+	return onSnapshot(
+		holdPlaceRef,
+		(snapshot) => {
+			if (!snapshot.exists()) {
+				onChange(null);
+				return;
+			}
+			const data = snapshot.data() as Partial<HoldPlace>;
+			onChange(normalizeHoldPlace(snapshot.id, data));
 		},
 		(error) => {
 			if (onError) {
