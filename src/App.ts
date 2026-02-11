@@ -32,7 +32,6 @@ type TopState = {
 	error: string | null;
 	query: string;
 	zoom: number;
-	selectedCoord: { x: number; y: number } | null;
 	selectedPlace: Place | null;
 	selectedPlaceLoading: boolean;
 	selectedPlaceError: string | null;
@@ -89,9 +88,6 @@ export class App {
 		const params = new URLSearchParams(location.search);
 		const zoomParam = Number.parseFloat(params.get("z") ?? "");
 		const zoom = Number.isFinite(zoomParam) ? zoomParam : 1;
-		const xParam = Number.parseInt(params.get("x") ?? "", 10);
-		const yParam = Number.parseInt(params.get("y") ?? "", 10);
-		const selectedCoord = Number.isFinite(xParam) && Number.isFinite(yParam) ? { x: xParam, y: yParam } : null;
 
 		this.topState = {
 			places: [],
@@ -100,7 +96,6 @@ export class App {
 			error: null,
 			query: "",
 			zoom,
-			selectedCoord,
 			selectedPlace: null,
 			selectedPlaceLoading: false,
 			selectedPlaceError: null,
@@ -162,9 +157,29 @@ export class App {
 		}
 
 		const route = utils.parseRoute();
-		if (route.name !== "top") {
+		if (route.name !== "place") {
 			this.stopSelectedPlaceWatch();
 			this.stopSelectedHoldPlaceWatch();
+			if (
+				this.topState.selectedPlace ||
+				this.topState.selectedPlaceLoading ||
+				this.topState.selectedPlaceError ||
+				this.topState.selectedHoldPlace ||
+				this.topState.selectedHoldPlaceLoading ||
+				this.topState.selectedHoldPlaceError ||
+				this.topState.ignoreHoldPlaceId
+			) {
+				this.topState = {
+					...this.topState,
+					selectedPlace: null,
+					selectedPlaceLoading: false,
+					selectedPlaceError: null,
+					selectedHoldPlace: null,
+					selectedHoldPlaceLoading: false,
+					selectedHoldPlaceError: null,
+					ignoreHoldPlaceId: null,
+				};
+			}
 		}
 		switch (route.name) {
 			case "login":
@@ -178,6 +193,9 @@ export class App {
 				break;
 			case "top":
 				this.renderTop();
+				break;
+			case "place":
+				this.renderPlace(route.placeId);
 				break;
 			default:
 				this.renderTop();
@@ -223,7 +241,6 @@ export class App {
 			void this.loadPlaces();
 		}
 
-		this.syncSelectedPlaceWatch();
 		const { places, loading, error, query } = this.topState;
 		const normalizedQuery = query.trim().toLowerCase();
 		const gridMetrics = this.getGridMetrics(places);
@@ -252,7 +269,6 @@ export class App {
 		}
 
 		const menuMarkup = this.renderMenuMarkup(user, this.state.profile);
-		const selectedPlaceMarkup = this.renderSelectedPlacePanel();
 		this.rootEl.innerHTML = `
 			<div class="top-page container py-5">
 				<div class="d-flex align-items-end justify-content-between flex-wrap gap-3 mb-3">
@@ -277,7 +293,6 @@ export class App {
 					</div>
 					${gridOverlay}
 				</div>
-				${selectedPlaceMarkup}
 			</div>
 			${menuMarkup}
 		`;
@@ -285,6 +300,41 @@ export class App {
 		this.bindMenuEvents(user);
 		this.bindTopEvents();
 		this.restoreTopFocus();
+	}
+
+	renderPlace(placeId: string) {
+		const user = this.state.user;
+		if (!user) {
+			utils.navigateTo("/login");
+			return;
+		}
+		if (user && !this.state.profileLoaded && !this.state.profileLoading) {
+			void this.loadUserProfile();
+		}
+
+		this.syncSelectedPlaceWatch(placeId);
+		const menuMarkup = this.renderMenuMarkup(user, this.state.profile);
+		const selectedPlaceMarkup = this.renderSelectedPlacePanel();
+		const placeName = this.topState.selectedPlace?.name ?? "Place";
+		const placeIdLabel = this.topState.selectedPlace?.id ?? placeId;
+
+		this.rootEl.innerHTML = `
+			<div class="place-page container py-5">
+				<div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+					<button id="place-back" class="btn btn-outline-secondary btn-sm" type="button">一覧に戻る</button>
+					<div class="text-end">
+						<div class="small text-muted">Place</div>
+						<div class="h5 m-0">${utils.escapeHtml(placeName)}</div>
+						<div class="small text-muted">ID: ${utils.escapeHtml(placeIdLabel)}</div>
+					</div>
+				</div>
+				${selectedPlaceMarkup}
+			</div>
+			${menuMarkup}
+		`;
+
+		this.bindMenuEvents(user);
+		this.bindPlaceEvents();
 	}
 
 	getGridMetrics(places: Place[]) {
@@ -325,11 +375,12 @@ export class App {
 		const statusText = status === "playing" ? "現在確保済み" : "現在空き地";
 		const holdMinutes = this.getHoldableMinutes(place);
 		const holdText = holdMinutes ? `保持 最大 ~${holdMinutes}分` : "保持 最大: 未設定";
-		const isSelected = this.topState.selectedCoord?.x === place.x && this.topState.selectedCoord?.y === place.y;
 		const statusBadgeClass = status === "playing" ? "bg-warning text-dark" : "bg-success";
-		const selectedClass = isSelected ? "border-dark border-2 shadow-sm" : "border";
+		const selectedClass = "border";
 		return `
-			<div class="top-place-card card h-100 ${selectedClass} is-${status}" data-x="${place.x}" data-y="${place.y}" style="grid-column:${col}; grid-row:${row};">
+			<div class="top-place-card card h-100 ${selectedClass} is-${status}" data-place-id="${utils.escapeHtml(
+				place.id,
+			)}" style="grid-column:${col}; grid-row:${row};">
 				<div class="card-body p-3">
 					<div class="d-flex justify-content-between align-items-center mb-2">
 						<div class="fw-semibold">${utils.escapeHtml(place.name)}</div>
@@ -343,10 +394,6 @@ export class App {
 	}
 
 	renderSelectedPlacePanel() {
-		if (!this.topState.selectedCoord) {
-			return "";
-		}
-
 		const { selectedPlace, selectedPlaceLoading, selectedPlaceError } = this.topState;
 		let bodyMarkup = "";
 
@@ -394,7 +441,7 @@ export class App {
 			bodyMarkup = `
 				<div class="d-flex justify-content-between align-items-center mb-2">
 					<div>
-						<div class="small text-muted">選択中のPlace</div>
+						<div class="small text-muted">Place</div>
 						<div class="fw-semibold">${utils.escapeHtml(selectedPlace.name)}</div>
 						<div class="small text-muted">ID: ${utils.escapeHtml(selectedPlace.id)}</div>
 					</div>
@@ -429,14 +476,6 @@ export class App {
 		`;
 	}
 
-	getSelectedPlaceFromState() {
-		const selectedCoord = this.topState.selectedCoord;
-		if (!selectedCoord) return null;
-		return (
-			this.topState.places.find((place) => place.x === selectedCoord.x && place.y === selectedCoord.y) ?? null
-		);
-	}
-
 	stopSelectedPlaceWatch() {
 		if (this.placeWatchUnsub) {
 			this.placeWatchUnsub();
@@ -453,8 +492,8 @@ export class App {
 		this.holdPlaceWatchId = null;
 	}
 
-	syncSelectedPlaceWatch() {
-		if (!this.topState.selectedCoord) {
+	syncSelectedPlaceWatch(placeId: string | null) {
+		if (!placeId) {
 			if (this.placeWatchId) this.stopSelectedPlaceWatch();
 			if (this.holdPlaceWatchId) this.stopSelectedHoldPlaceWatch();
 			if (
@@ -479,31 +518,84 @@ export class App {
 			return;
 		}
 
-		if (!this.topState.loaded) {
-			if (!this.topState.selectedPlaceLoading) {
+		const selectedPlace =
+			this.topState.selectedPlace && this.topState.selectedPlace.id === placeId
+				? this.topState.selectedPlace
+				: null;
+
+		if (!selectedPlace) {
+			if (this.holdPlaceWatchId) {
+				this.stopSelectedHoldPlaceWatch();
+			}
+			if (
+				this.topState.selectedHoldPlace ||
+				this.topState.selectedHoldPlaceError ||
+				this.topState.selectedHoldPlaceLoading
+			) {
 				this.topState = {
 					...this.topState,
-					selectedPlace: null,
-					selectedPlaceLoading: true,
-					selectedPlaceError: null,
+					selectedHoldPlace: null,
+					selectedHoldPlaceLoading: false,
+					selectedHoldPlaceError: null,
 				};
 			}
-			return;
-		}
 
-		const selectedPlace = this.getSelectedPlaceFromState();
-		if (!selectedPlace) {
+			if (this.placeWatchId === placeId) {
+				return;
+			}
+
 			this.stopSelectedPlaceWatch();
-			this.stopSelectedHoldPlaceWatch();
+
+			const watchId = placeId;
+			this.placeWatchId = watchId;
 			this.topState = {
 				...this.topState,
 				selectedPlace: null,
-				selectedPlaceLoading: false,
-				selectedPlaceError: "選択したPlaceが見つかりません。",
-				selectedHoldPlace: null,
-				selectedHoldPlaceLoading: false,
-				selectedHoldPlaceError: null,
+				selectedPlaceLoading: true,
+				selectedPlaceError: null,
+				ignoreHoldPlaceId: null,
 			};
+
+			this.placeWatchUnsub = watchPlace(
+				this.firebase.firestore,
+				watchId,
+				(place) => {
+					if (this.placeWatchId !== watchId) return;
+					if (!place) {
+						this.topState = {
+							...this.topState,
+							selectedPlace: null,
+							selectedPlaceLoading: false,
+							selectedPlaceError: "選択したPlaceが見つかりません。",
+						};
+						this.render();
+						return;
+					}
+					let nextIgnoreHoldPlaceId = this.topState.ignoreHoldPlaceId;
+					if (nextIgnoreHoldPlaceId && place.currentHoldPlaceId !== nextIgnoreHoldPlaceId) {
+						nextIgnoreHoldPlaceId = null;
+					}
+					const nextPlaces = this.topState.places.map((item) => (item.id === place.id ? place : item));
+					this.topState = {
+						...this.topState,
+						places: nextPlaces,
+						selectedPlace: place,
+						selectedPlaceLoading: false,
+						selectedPlaceError: null,
+						ignoreHoldPlaceId: nextIgnoreHoldPlaceId,
+					};
+					this.render();
+				},
+				() => {
+					if (this.placeWatchId !== watchId) return;
+					this.topState = {
+						...this.topState,
+						selectedPlaceLoading: false,
+						selectedPlaceError: "Placeの監視に失敗しました。",
+					};
+					this.render();
+				},
+			);
 			return;
 		}
 
@@ -826,18 +918,21 @@ export class App {
 
 		const placeCards = Array.from(this.rootEl.querySelectorAll<HTMLDivElement>(".top-place-card"));
 		placeCards.forEach((card) => {
-			const x = Number(card.dataset.x);
-			const y = Number(card.dataset.y);
-			if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+			const placeId = card.dataset.placeId;
+			if (!placeId) return;
 			card.addEventListener("click", () => {
-				this.topState = {
-					...this.topState,
-					selectedCoord: { x, y },
-				};
-				this.updateTopUrl({ x, y });
-				this.render();
+				utils.navigateTo(`/place/${encodeURIComponent(placeId)}`);
 			});
 		});
+	}
+
+	bindPlaceEvents() {
+		const backButton = this.rootEl.querySelector<HTMLButtonElement>("#place-back");
+		if (backButton) {
+			backButton.addEventListener("click", () => {
+				utils.navigateTo("/");
+			});
+		}
 
 		const holdButton = this.rootEl.querySelector<HTMLButtonElement>("#place-hold-button");
 		if (holdButton) {
