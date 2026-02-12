@@ -23,10 +23,21 @@ export function isDebugMode() {
 	return isXXXMode("debug");
 }
 
-export type Route = { name: "login" } | { name: "my" } | { name: "my-edit" } | { name: "top" };
+export type Route =
+	| { name: "login" }
+	| { name: "my" }
+	| { name: "my-edit" }
+	| { name: "top" }
+	| { name: "place"; placeId: string };
 
 export function parseRoute(): Route {
 	const path = window.location.pathname || "/";
+	if (path.startsWith("/place/")) {
+		const placeId = decodeURIComponent(path.replace("/place/", ""));
+		if (placeId) {
+			return { name: "place", placeId };
+		}
+	}
 	if (path.startsWith("/my/edit")) {
 		return { name: "my-edit" };
 	}
