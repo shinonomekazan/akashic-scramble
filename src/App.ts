@@ -30,6 +30,17 @@ type TopState = {
 	loading: boolean;
 	loaded: boolean;
 	error: string | null;
+	cameraX: number | null;
+	cameraY: number | null;
+};
+
+type TopPointerState = {
+	pointerId: number | null;
+	startClientX: number;
+	startClientY: number;
+	startCameraX: number;
+	startCameraY: number;
+	moved: boolean;
 };
 
 type PlaceState = {
@@ -60,6 +71,7 @@ export class App {
 	placeWatchId: string | null;
 	holdPlaceWatchUnsub: (() => void) | null;
 	holdPlaceWatchId: string | null;
+	topPointerState: TopPointerState;
 
 	constructor(config: AppConfig = appConfig as AppConfig) {
 		this.config = config;
@@ -86,12 +98,17 @@ export class App {
 			profileLoading: false,
 			needsProfile: false,
 		};
+		const searchParams = new URLSearchParams(location.search);
+		const cameraX = Number.parseFloat(searchParams.get("x") ?? "");
+		const cameraY = Number.parseFloat(searchParams.get("y") ?? "");
 
 		this.topState = {
 			places: [],
 			loading: false,
 			loaded: false,
 			error: null,
+			cameraX: Number.isFinite(cameraX) ? cameraX : null,
+			cameraY: Number.isFinite(cameraY) ? cameraY : null,
 		};
 
 		this.placeState = {
@@ -113,6 +130,14 @@ export class App {
 		this.placeWatchId = null;
 		this.holdPlaceWatchUnsub = null;
 		this.holdPlaceWatchId = null;
+		this.topPointerState = {
+			pointerId: null,
+			startClientX: 0,
+			startClientY: 0,
+			startCameraX: 0,
+			startCameraY: 0,
+			moved: false,
+		};
 	}
 
 	main() {
@@ -131,6 +156,11 @@ export class App {
 		});
 		window.addEventListener("popstate", () => {
 			this.render();
+		});
+		window.addEventListener("resize", () => {
+			if (utils.parseRoute().name !== "top") return;
+			const gridMetrics = this.getGridMetrics(this.topState.places);
+			this.applyTopGridLayout(gridMetrics);
 		});
 		this.render();
 	}
@@ -248,6 +278,7 @@ export class App {
 			utils.navigateTo("/login");
 			return;
 		}
+		this.syncTopCameraFromUrl();
 		if (user && !this.state.profileLoaded && !this.state.profileLoading) {
 			void this.loadUserProfile();
 		}
@@ -258,6 +289,14 @@ export class App {
 
 		const { places, loading, error } = this.topState;
 		const gridMetrics = this.getGridMetrics(places);
+		const nextCamera = this.resolveTopCamera(gridMetrics);
+		if (this.topState.cameraX !== nextCamera.cameraX || this.topState.cameraY !== nextCamera.cameraY) {
+			this.topState = {
+				...this.topState,
+				cameraX: nextCamera.cameraX,
+				cameraY: nextCamera.cameraY,
+			};
+		}
 
 		const placeCardsMarkup = places
 			.map((place) => this.renderTopPlaceCard(place, gridMetrics.minX, gridMetrics.minY))
@@ -274,17 +313,25 @@ export class App {
 
 		const menuMarkup = this.renderMenuMarkup(user, this.state.profile);
 		this.rootEl.innerHTML = `
-			<div class="top-page container py-5">
-				<div class="d-flex align-items-end justify-content-between flex-wrap gap-3 mb-3">
-					<h1 class="h4 m-0">プレイス一覧</h1>
-				</div>
-				<div class="top-grid-stage border rounded-3 p-3 bg-white position-relative">
-					<div class="top-grid" style="--cols:${gridMetrics.cols}; --rows:${gridMetrics.rows};">
-						${placeCardsMarkup}
+				<div class="top-page container py-5">
+					<div class="d-flex align-items-end justify-content-between flex-wrap gap-3 mb-3">
+						<h1 class="h4 m-0">プレイス一覧</h1>
 					</div>
-					${gridOverlay}
+					<div id="top-grid-stage" class="top-grid-stage border rounded-3 p-3 bg-white position-relative">
+						<div id="top-grid-viewport" class="top-grid-viewport">
+							<div
+								id="top-grid"
+								class="top-grid"
+								data-min-x="${gridMetrics.minX}"
+								data-min-y="${gridMetrics.minY}"
+								style="--cols:${gridMetrics.cols}; --rows:${gridMetrics.rows};"
+							>
+								${placeCardsMarkup}
+							</div>
+						</div>
+						${gridOverlay}
+					</div>
 				</div>
-			</div>
 			${menuMarkup}
 		`;
 
@@ -329,7 +376,7 @@ export class App {
 
 	getGridMetrics(places: Place[]) {
 		if (places.length === 0) {
-			return { minX: 0, minY: 0, cols: 1, rows: 1 };
+			return { minX: 0, maxX: 0, minY: 0, maxY: 0, cols: 1, rows: 1 };
 		}
 		const xs = places.map((place) => place.x);
 		const ys = places.map((place) => place.y);
@@ -339,9 +386,192 @@ export class App {
 		const maxY = Math.max(...ys);
 		return {
 			minX,
+			maxX,
 			minY,
+			maxY,
 			cols: maxX - minX + 1,
 			rows: maxY - minY + 1,
+		};
+	}
+
+	clampTopCamera(cameraX: number, cameraY: number, gridMetrics: ReturnType<App["getGridMetrics"]>) {
+		return {
+			cameraX: Math.min(gridMetrics.maxX, Math.max(gridMetrics.minX, cameraX)),
+			cameraY: Math.min(gridMetrics.maxY, Math.max(gridMetrics.minY, cameraY)),
+		};
+	}
+
+	getDefaultTopCamera(gridMetrics: ReturnType<App["getGridMetrics"]>) {
+		let defaultCameraX = (gridMetrics.minX + gridMetrics.maxX) / 2;
+		let defaultCameraY = (gridMetrics.minY + gridMetrics.maxY) / 2;
+		const places = this.topState.places;
+		if (places.length > 0) {
+			const avgX = places.reduce((sum, place) => sum + place.x, 0) / places.length;
+			const avgY = places.reduce((sum, place) => sum + place.y, 0) / places.length;
+			let anchor = places[0];
+			let minDistance = Number.POSITIVE_INFINITY;
+			for (const place of places) {
+				const distance = Math.hypot(place.x - avgX, place.y - avgY);
+				if (distance < minDistance) {
+					minDistance = distance;
+					anchor = place;
+				}
+			}
+			defaultCameraX = anchor.x;
+			defaultCameraY = anchor.y;
+		}
+		return this.clampTopCamera(defaultCameraX, defaultCameraY, gridMetrics);
+	}
+
+	resolveTopCamera(gridMetrics: ReturnType<App["getGridMetrics"]>) {
+		const defaultCamera = this.getDefaultTopCamera(gridMetrics);
+		const hasCustomCamera = Number.isFinite(this.topState.cameraX) && Number.isFinite(this.topState.cameraY);
+		const cameraX = hasCustomCamera ? (this.topState.cameraX as number) : defaultCamera.cameraX;
+		const cameraY = hasCustomCamera ? (this.topState.cameraY as number) : defaultCamera.cameraY;
+		return this.clampTopCamera(cameraX, cameraY, gridMetrics);
+	}
+
+	isAnyTopPlaceCardVisible() {
+		const viewportEl = this.rootEl.querySelector<HTMLElement>("#top-grid-viewport");
+		if (!viewportEl) return false;
+		const viewportRect = viewportEl.getBoundingClientRect();
+		const cards = Array.from(this.rootEl.querySelectorAll<HTMLElement>(".top-place-card"));
+		return cards.some((card) => {
+			const rect = card.getBoundingClientRect();
+			return (
+				rect.right > viewportRect.left &&
+				rect.left < viewportRect.right &&
+				rect.bottom > viewportRect.top &&
+				rect.top < viewportRect.bottom
+			);
+		});
+	}
+
+	ensureTopGridCameraVisible() {
+		if (!window.matchMedia("(max-width: 768px)").matches) return;
+		if (this.topState.places.length === 0) return;
+		if (this.isAnyTopPlaceCardVisible()) return;
+		const fallbackCamera = this.getDefaultTopCamera(this.getGridMetrics(this.topState.places));
+		if (this.topState.cameraX === fallbackCamera.cameraX && this.topState.cameraY === fallbackCamera.cameraY)
+			return;
+		this.topState = {
+			...this.topState,
+			cameraX: fallbackCamera.cameraX,
+			cameraY: fallbackCamera.cameraY,
+		};
+		this.applyTopGridCamera();
+	}
+
+	applyTopGridLayout(gridMetrics: ReturnType<App["getGridMetrics"]>) {
+		this.updateTopGridTileSize(gridMetrics);
+		this.applyTopGridCamera();
+		this.ensureTopGridCameraVisible();
+	}
+
+	scheduleTopGridLayout(gridMetrics: ReturnType<App["getGridMetrics"]>) {
+		this.applyTopGridLayout(gridMetrics);
+		window.requestAnimationFrame(() => {
+			if (utils.parseRoute().name !== "top") return;
+			this.applyTopGridLayout(gridMetrics);
+		});
+	}
+
+	readTopLayoutMetrics(stageEl: HTMLElement) {
+		const style = getComputedStyle(stageEl);
+		const tileWidth = Number.parseFloat(style.getPropertyValue("--top-tile-width")) || 160;
+		const tileHeight = Number.parseFloat(style.getPropertyValue("--top-tile-height")) || 140;
+		const tileGap = Number.parseFloat(style.getPropertyValue("--top-tile-gap")) || 12;
+		return {
+			tileWidth,
+			tileHeight,
+			tileGap,
+			tileStrideX: tileWidth + tileGap,
+			tileStrideY: tileHeight + tileGap,
+		};
+	}
+
+	updateTopGridTileSize(gridMetrics: ReturnType<App["getGridMetrics"]>) {
+		const stageEl = this.rootEl.querySelector<HTMLElement>("#top-grid-stage");
+		const viewportEl = this.rootEl.querySelector<HTMLElement>("#top-grid-viewport");
+		if (!stageEl || !viewportEl) return;
+		if (viewportEl.clientWidth <= 0 || viewportEl.clientHeight <= 0) return;
+		const style = getComputedStyle(stageEl);
+		const gap = Number.parseFloat(style.getPropertyValue("--top-tile-gap")) || 12;
+		const minTileWidth = Number.parseFloat(style.getPropertyValue("--top-tile-width-min")) || 160;
+		const minTileHeight = Number.parseFloat(style.getPropertyValue("--top-tile-height-min")) || 140;
+		const cols = Math.max(1, gridMetrics.cols);
+		const rows = Math.max(1, gridMetrics.rows);
+		const availableWidth = Math.max(0, viewportEl.clientWidth - gap * (cols - 1));
+		const availableHeight = Math.max(0, viewportEl.clientHeight - gap * (rows - 1));
+		const fitTileWidth = availableWidth / cols;
+		const fitTileHeight = availableHeight / rows;
+		const tileWidth = Math.max(minTileWidth, fitTileWidth);
+		const tileHeight = Math.max(minTileHeight, fitTileHeight);
+		stageEl.style.setProperty("--top-tile-width", String(tileWidth));
+		stageEl.style.setProperty("--top-tile-height", String(tileHeight));
+	}
+
+	applyTopGridCamera() {
+		const stageEl = this.rootEl.querySelector<HTMLElement>("#top-grid-stage");
+		const viewportEl = this.rootEl.querySelector<HTMLElement>("#top-grid-viewport");
+		const gridEl = this.rootEl.querySelector<HTMLElement>("#top-grid");
+		if (!stageEl || !viewportEl || !gridEl) return;
+		if (viewportEl.clientWidth <= 0 || viewportEl.clientHeight <= 0) return;
+
+		const minX = Number.parseFloat(gridEl.dataset.minX ?? "");
+		const minY = Number.parseFloat(gridEl.dataset.minY ?? "");
+		if (!Number.isFinite(minX) || !Number.isFinite(minY)) return;
+
+		const cameraX = this.topState.cameraX;
+		const cameraY = this.topState.cameraY;
+		if (cameraX == null || cameraY == null) return;
+
+		const metrics = this.readTopLayoutMetrics(stageEl);
+		const centerX = (cameraX - minX) * metrics.tileStrideX + metrics.tileWidth / 2;
+		const centerY = (cameraY - minY) * metrics.tileStrideY + metrics.tileHeight / 2;
+		const translateX = viewportEl.clientWidth / 2 - centerX;
+		const translateY = viewportEl.clientHeight / 2 - centerY;
+		gridEl.style.transform = `translate(${translateX}px, ${translateY}px)`;
+	}
+
+	updateTopCameraUrl(cameraX: number, cameraY: number) {
+		const url = new URL(location.href);
+		url.searchParams.set("x", cameraX.toFixed(3));
+		url.searchParams.set("y", cameraY.toFixed(3));
+		history.replaceState({}, "", url.toString());
+	}
+
+	syncTopCameraFromUrl() {
+		const params = new URLSearchParams(location.search);
+		const rawX = params.get("x");
+		const rawY = params.get("y");
+		if (rawX == null && rawY == null) {
+			if (this.topState.cameraX == null && this.topState.cameraY == null) return;
+			this.topState = {
+				...this.topState,
+				cameraX: null,
+				cameraY: null,
+			};
+			return;
+		}
+
+		// Accept decimal values with "." (and tolerate "," by normalizing).
+		const parsedX = Number.parseFloat((rawX ?? "").replace(",", "."));
+		const parsedY = Number.parseFloat((rawY ?? "").replace(",", "."));
+		if (!Number.isFinite(parsedX) || !Number.isFinite(parsedY)) {
+			// Ignore malformed partial params instead of forcing center fallback.
+			return;
+		}
+
+		const nextCameraX = parsedX;
+		const nextCameraY = parsedY;
+		if (this.topState.cameraX === nextCameraX && this.topState.cameraY === nextCameraY) {
+			return;
+		}
+		this.topState = {
+			...this.topState,
+			cameraX: nextCameraX,
+			cameraY: nextCameraY,
 		};
 	}
 
@@ -371,13 +601,13 @@ export class App {
 			<div class="top-place-card card h-100 ${selectedClass} is-${status}" data-place-id="${utils.escapeHtml(
 				place.id,
 			)}" style="grid-column:${col}; grid-row:${row};">
-				<div class="card-body p-3">
-					<div class="d-flex justify-content-between align-items-center mb-2">
-						<div class="fw-semibold">${utils.escapeHtml(place.name)}</div>
+				<div class="card-body top-place-card-body">
+					<div class="top-place-card-badge-row">
 						<span class="badge ${statusBadgeClass}">${statusLabel}</span>
 					</div>
-					<div class="small text-secondary">${statusText}</div>
-					<div class="small text-muted">${holdText}</div>
+					<div class="top-place-card-name">${utils.escapeHtml(place.name)}</div>
+					<div class="top-place-card-status">${statusText}</div>
+					<div class="top-place-card-hold">${holdText}</div>
 				</div>
 			</div>
 		`;
@@ -885,13 +1115,105 @@ export class App {
 	}
 
 	bindTopEvents() {
-		const placeCards = Array.from(this.rootEl.querySelectorAll<HTMLDivElement>(".top-place-card"));
-		placeCards.forEach((card) => {
-			const placeId = card.dataset.placeId;
-			if (!placeId) return;
-			card.addEventListener("click", () => {
-				utils.navigateTo(`/place/${encodeURIComponent(placeId)}`);
-			});
+		const stageEl = this.rootEl.querySelector<HTMLElement>("#top-grid-stage");
+		const viewportEl = this.rootEl.querySelector<HTMLElement>("#top-grid-viewport");
+		if (!stageEl || !viewportEl) return;
+
+		const places = this.topState.places;
+		const gridMetrics = this.getGridMetrics(places);
+		const tapThresholdPx = 6;
+		const tapMaxDistance = 0.75;
+		this.scheduleTopGridLayout(gridMetrics);
+
+		stageEl.addEventListener("pointerdown", (event) => {
+			if (event.pointerType === "mouse" && event.button !== 0) return;
+			const camera = this.resolveTopCamera(gridMetrics);
+			this.topPointerState = {
+				pointerId: event.pointerId,
+				startClientX: event.clientX,
+				startClientY: event.clientY,
+				startCameraX: camera.cameraX,
+				startCameraY: camera.cameraY,
+				moved: false,
+			};
+			stageEl.setPointerCapture(event.pointerId);
+		});
+
+		stageEl.addEventListener("pointermove", (event) => {
+			if (this.topPointerState.pointerId !== event.pointerId) return;
+			const metrics = this.readTopLayoutMetrics(stageEl);
+			const diffX = event.clientX - this.topPointerState.startClientX;
+			const diffY = event.clientY - this.topPointerState.startClientY;
+			const moved = Math.abs(diffX) > tapThresholdPx || Math.abs(diffY) > tapThresholdPx;
+			if (moved && !this.topPointerState.moved) {
+				this.topPointerState = {
+					...this.topPointerState,
+					moved: true,
+				};
+			}
+
+			const nextCamera = this.clampTopCamera(
+				this.topPointerState.startCameraX - diffX / metrics.tileStrideX,
+				this.topPointerState.startCameraY - diffY / metrics.tileStrideY,
+				gridMetrics,
+			);
+			this.topState = {
+				...this.topState,
+				cameraX: nextCamera.cameraX,
+				cameraY: nextCamera.cameraY,
+			};
+			this.applyTopGridCamera();
+		});
+
+		const onPointerEnd = (event: PointerEvent, cancelled: boolean) => {
+			if (this.topPointerState.pointerId !== event.pointerId) return;
+			const pointerState = this.topPointerState;
+			this.topPointerState = {
+				...this.topPointerState,
+				pointerId: null,
+				moved: false,
+			};
+			if (stageEl.hasPointerCapture(event.pointerId)) {
+				stageEl.releasePointerCapture(event.pointerId);
+			}
+
+			const camera = this.resolveTopCamera(gridMetrics);
+			this.topState = {
+				...this.topState,
+				cameraX: camera.cameraX,
+				cameraY: camera.cameraY,
+			};
+			this.applyTopGridCamera();
+			if (!cancelled) {
+				this.updateTopCameraUrl(camera.cameraX, camera.cameraY);
+			}
+
+			if (cancelled || pointerState.moved || places.length === 0) return;
+
+			const metrics = this.readTopLayoutMetrics(stageEl);
+			const rect = viewportEl.getBoundingClientRect();
+			const worldX = camera.cameraX + (event.clientX - (rect.left + rect.width / 2)) / metrics.tileStrideX;
+			const worldY = camera.cameraY + (event.clientY - (rect.top + rect.height / 2)) / metrics.tileStrideY;
+
+			let nearestPlace: Place | null = null;
+			let nearestDistance = Number.POSITIVE_INFINITY;
+			for (const place of places) {
+				const distance = Math.hypot(place.x - worldX, place.y - worldY);
+				if (distance < nearestDistance) {
+					nearestDistance = distance;
+					nearestPlace = place;
+				}
+			}
+			if (nearestPlace && nearestDistance <= tapMaxDistance) {
+				utils.navigateTo(`/place/${encodeURIComponent(nearestPlace.id)}`);
+			}
+		};
+
+		stageEl.addEventListener("pointerup", (event) => {
+			onPointerEnd(event, false);
+		});
+		stageEl.addEventListener("pointercancel", (event) => {
+			onPointerEnd(event, true);
 		});
 	}
 

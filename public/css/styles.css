@@ -251,6 +251,21 @@ body {
 	.login-card {
 		max-width: 100%;
 	}
+
+	.top-page {
+		height: 100svh;
+		min-height: 100svh;
+		display: flex;
+		flex-direction: column;
+		padding-top: 1rem !important;
+		padding-bottom: 1rem !important;
+	}
+
+	.top-grid-stage {
+		flex: 1 1 auto;
+		height: auto;
+		min-height: 0;
+	}
 }
 
 .top-page {
@@ -259,15 +274,36 @@ body {
 }
 
 .top-grid-stage {
-	min-height: 240px;
-	overflow: auto;
+	--top-tile-width-min: 160;
+	--top-tile-height-min: 140;
+	--top-tile-width: 160;
+	--top-tile-height: 140;
+	--top-tile-gap: 12;
+	display: flex;
+	flex-direction: column;
+	height: 440px;
+	overflow: hidden;
+	touch-action: none;
+	user-select: none;
+}
+
+.top-grid-viewport {
+	position: relative;
+	width: 100%;
+	flex: 1 1 auto;
+	min-height: 0;
+	overflow: hidden;
 }
 
 .top-grid {
+	position: absolute;
+	inset: 0 auto auto 0;
 	display: grid;
-	grid-template-columns: repeat(var(--cols), minmax(160px, 1fr));
-	grid-template-rows: repeat(var(--rows), 140px);
-	gap: 12px;
+	grid-template-columns: repeat(var(--cols), calc(var(--top-tile-width) * 1px));
+	grid-template-rows: repeat(var(--rows), calc(var(--top-tile-height) * 1px));
+	gap: calc(var(--top-tile-gap) * 1px);
+	transform-origin: 0 0;
+	will-change: transform;
 }
 
 .top-grid-overlay {
@@ -287,6 +323,39 @@ body {
 
 .top-place-card {
 	cursor: pointer;
+	width: calc(var(--top-tile-width) * 1px);
+}
+
+.top-place-card-body {
+	padding: 12px;
+}
+
+.top-place-card-badge-row {
+	display: flex;
+	justify-content: flex-end;
+	margin-bottom: 8px;
+}
+
+.top-place-card-name {
+	font-weight: 600;
+	line-height: 1.35;
+	margin-bottom: 6px;
+	display: -webkit-box;
+	-webkit-box-orient: vertical;
+	-webkit-line-clamp: 2;
+	overflow: hidden;
+	min-height: 2.7em;
+}
+
+.top-place-card-status,
+.top-place-card-hold {
+	font-size: 0.95rem;
+	line-height: 1.3;
+	color: #6c757d;
+}
+
+.top-place-card-hold {
+	margin-top: 2px;
 }
 
 .top-place-card.is-playing {
@@ -298,7 +367,33 @@ body {
 }
 
 @media (max-width: 600px) {
-	.top-grid {
-		grid-template-columns: repeat(var(--cols), minmax(140px, 1fr));
+	.top-grid-stage {
+		--top-tile-width-min: 140;
+		--top-tile-height-min: 130;
+	}
+
+	.top-place-card-body {
+		padding: 10px;
+	}
+
+	.top-place-card-name {
+		font-size: 0.92rem;
+		min-height: 2.55em;
+	}
+
+	.top-place-card-status,
+	.top-place-card-hold {
+		font-size: 0.8rem;
+	}
+
+	.top-place-card .badge {
+		font-size: 0.72rem;
+	}
+}
+
+@media (max-width: 400px) {
+	.top-grid-stage {
+		--top-tile-width-min: 124;
+		--top-tile-height-min: 116;
 	}
 }
