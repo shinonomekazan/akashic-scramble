@@ -173,7 +173,11 @@ export class App {
 				this.placeState.selectedHoldPlace ||
 				this.placeState.selectedHoldPlaceLoading ||
 				this.placeState.selectedHoldPlaceError ||
-				this.placeState.ignoreHoldPlaceId
+				this.placeState.ignoreHoldPlaceId ||
+				this.placeState.holdSubmitting ||
+				this.placeState.holdSubmittingPlaceId ||
+				this.placeState.releaseSubmitting ||
+				this.placeState.releaseSubmittingPlaceId
 			) {
 				this.placeState = {
 					...this.placeState,
@@ -185,6 +189,10 @@ export class App {
 					selectedHoldPlaceLoading: false,
 					selectedHoldPlaceError: null,
 					ignoreHoldPlaceId: null,
+					holdSubmitting: false,
+					holdSubmittingPlaceId: null,
+					releaseSubmitting: false,
+					releaseSubmittingPlaceId: null,
 				};
 			}
 		}
@@ -486,7 +494,11 @@ export class App {
 				this.placeState.selectedHoldPlace ||
 				this.placeState.selectedHoldPlaceLoading ||
 				this.placeState.selectedHoldPlaceError ||
-				this.placeState.ignoreHoldPlaceId
+				this.placeState.ignoreHoldPlaceId ||
+				this.placeState.holdSubmitting ||
+				this.placeState.holdSubmittingPlaceId ||
+				this.placeState.releaseSubmitting ||
+				this.placeState.releaseSubmittingPlaceId
 			) {
 				this.placeState = {
 					...this.placeState,
@@ -498,6 +510,10 @@ export class App {
 					selectedHoldPlaceLoading: false,
 					selectedHoldPlaceError: null,
 					ignoreHoldPlaceId: null,
+					holdSubmitting: false,
+					holdSubmittingPlaceId: null,
+					releaseSubmitting: false,
+					releaseSubmittingPlaceId: null,
 				};
 			}
 			return;
@@ -514,6 +530,10 @@ export class App {
 				selectedHoldPlaceLoading: false,
 				selectedHoldPlaceError: null,
 				ignoreHoldPlaceId: null,
+				holdSubmitting: false,
+				holdSubmittingPlaceId: null,
+				releaseSubmitting: false,
+				releaseSubmittingPlaceId: null,
 			};
 		}
 
