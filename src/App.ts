@@ -30,8 +30,10 @@ type TopState = {
 	loading: boolean;
 	loaded: boolean;
 	error: string | null;
-	query: string;
-	zoom: number;
+};
+
+type PlaceState = {
+	placeId: string | null;
 	selectedPlace: Place | null;
 	selectedPlaceLoading: boolean;
 	selectedPlaceError: string | null;
@@ -43,7 +45,6 @@ type TopState = {
 	holdSubmittingPlaceId: string | null;
 	releaseSubmitting: boolean;
 	releaseSubmittingPlaceId: string | null;
-	lastFocus: "search" | null;
 };
 
 export class App {
@@ -54,6 +55,7 @@ export class App {
 	toastEl: HTMLElement;
 	state: AuthState;
 	topState: TopState;
+	placeState: PlaceState;
 	placeWatchUnsub: (() => void) | null;
 	placeWatchId: string | null;
 	holdPlaceWatchUnsub: (() => void) | null;
@@ -85,17 +87,15 @@ export class App {
 			needsProfile: false,
 		};
 
-		const params = new URLSearchParams(location.search);
-		const zoomParam = Number.parseFloat(params.get("z") ?? "");
-		const zoom = Number.isFinite(zoomParam) ? zoomParam : 1;
-
 		this.topState = {
 			places: [],
 			loading: false,
 			loaded: false,
 			error: null,
-			query: "",
-			zoom,
+		};
+
+		this.placeState = {
+			placeId: null,
 			selectedPlace: null,
 			selectedPlaceLoading: false,
 			selectedPlaceError: null,
@@ -107,7 +107,6 @@ export class App {
 			holdSubmittingPlaceId: null,
 			releaseSubmitting: false,
 			releaseSubmittingPlaceId: null,
-			lastFocus: null,
 		};
 
 		this.placeWatchUnsub = null;
@@ -160,17 +159,29 @@ export class App {
 		if (route.name !== "place") {
 			this.stopSelectedPlaceWatch();
 			this.stopSelectedHoldPlaceWatch();
-			if (
-				this.topState.selectedPlace ||
-				this.topState.selectedPlaceLoading ||
-				this.topState.selectedPlaceError ||
-				this.topState.selectedHoldPlace ||
-				this.topState.selectedHoldPlaceLoading ||
-				this.topState.selectedHoldPlaceError ||
-				this.topState.ignoreHoldPlaceId
-			) {
+			if (this.placeState.placeId && this.topState.loaded) {
 				this.topState = {
 					...this.topState,
+					loaded: false,
+				};
+			}
+			if (
+				this.placeState.placeId ||
+				this.placeState.selectedPlace ||
+				this.placeState.selectedPlaceLoading ||
+				this.placeState.selectedPlaceError ||
+				this.placeState.selectedHoldPlace ||
+				this.placeState.selectedHoldPlaceLoading ||
+				this.placeState.selectedHoldPlaceError ||
+				this.placeState.ignoreHoldPlaceId ||
+				this.placeState.holdSubmitting ||
+				this.placeState.holdSubmittingPlaceId ||
+				this.placeState.releaseSubmitting ||
+				this.placeState.releaseSubmittingPlaceId
+			) {
+				this.placeState = {
+					...this.placeState,
+					placeId: null,
 					selectedPlace: null,
 					selectedPlaceLoading: false,
 					selectedPlaceError: null,
@@ -178,6 +189,10 @@ export class App {
 					selectedHoldPlaceLoading: false,
 					selectedHoldPlaceError: null,
 					ignoreHoldPlaceId: null,
+					holdSubmitting: false,
+					holdSubmittingPlaceId: null,
+					releaseSubmitting: false,
+					releaseSubmittingPlaceId: null,
 				};
 			}
 		}
@@ -241,19 +256,10 @@ export class App {
 			void this.loadPlaces();
 		}
 
-		const { places, loading, error, query } = this.topState;
-		const normalizedQuery = query.trim().toLowerCase();
+		const { places, loading, error } = this.topState;
 		const gridMetrics = this.getGridMetrics(places);
 
-		const visiblePlaces = places.filter((place) => {
-			return (
-				!normalizedQuery ||
-				place.name.toLowerCase().includes(normalizedQuery) ||
-				place.id.toLowerCase().includes(normalizedQuery)
-			);
-		});
-
-		const placeCardsMarkup = visiblePlaces
+		const placeCardsMarkup = places
 			.map((place) => this.renderTopPlaceCard(place, gridMetrics.minX, gridMetrics.minY))
 			.join("");
 
@@ -264,8 +270,6 @@ export class App {
 			gridOverlay = `<div class="top-grid-overlay is-error">${utils.escapeHtml(error)}</div>`;
 		} else if (places.length === 0) {
 			gridOverlay = '<div class="top-grid-overlay">Placeがまだありません。</div>';
-		} else if (visiblePlaces.length === 0) {
-			gridOverlay = '<div class="top-grid-overlay">条件に一致するPlaceがありません。</div>';
 		}
 
 		const menuMarkup = this.renderMenuMarkup(user, this.state.profile);
@@ -273,19 +277,6 @@ export class App {
 			<div class="top-page container py-5">
 				<div class="d-flex align-items-end justify-content-between flex-wrap gap-3 mb-3">
 					<h1 class="h4 m-0">プレイス一覧</h1>
-					<label class="d-flex flex-column gap-1">
-						<span class="form-label text-uppercase small text-muted m-0">検索</span>
-						<div class="input-group input-group-sm">
-							<input
-								id="top-search-input"
-								type="text"
-								class="form-control"
-								value="${utils.escapeHtml(query)}"
-								placeholder="Place名やIDで検索"
-								autocomplete="off"
-							/>
-						</div>
-					</label>
 				</div>
 				<div class="top-grid-stage border rounded-3 p-3 bg-white position-relative">
 					<div class="top-grid" style="--cols:${gridMetrics.cols}; --rows:${gridMetrics.rows};">
@@ -299,7 +290,6 @@ export class App {
 
 		this.bindMenuEvents(user);
 		this.bindTopEvents();
-		this.restoreTopFocus();
 	}
 
 	renderPlace(placeId: string) {
@@ -315,8 +305,8 @@ export class App {
 		this.syncSelectedPlaceWatch(placeId);
 		const menuMarkup = this.renderMenuMarkup(user, this.state.profile);
 		const selectedPlaceMarkup = this.renderSelectedPlacePanel();
-		const placeName = this.topState.selectedPlace?.name ?? "Place";
-		const placeIdLabel = this.topState.selectedPlace?.id ?? placeId;
+		const placeName = this.placeState.selectedPlace?.name ?? "Place";
+		const placeIdLabel = this.placeState.selectedPlace?.id ?? placeId;
 
 		this.rootEl.innerHTML = `
 			<div class="place-page container py-5">
@@ -394,7 +384,7 @@ export class App {
 	}
 
 	renderSelectedPlacePanel() {
-		const { selectedPlace, selectedPlaceLoading, selectedPlaceError } = this.topState;
+		const { selectedPlace, selectedPlaceLoading, selectedPlaceError } = this.placeState;
 		let bodyMarkup = "";
 
 		if (selectedPlaceLoading) {
@@ -410,18 +400,18 @@ export class App {
 			const statusBadgeClass = status === "playing" ? "bg-warning text-dark" : "bg-success";
 			const holdMinutes = this.getHoldableMinutes(selectedPlace);
 			const holdText = holdMinutes ? `保持 最大 ~${holdMinutes}分` : "保持 最大: 未設定";
-			const holdPlace = this.topState.selectedHoldPlace;
-			const holdPlaceLoading = this.topState.selectedHoldPlaceLoading;
-			const holdPlaceError = this.topState.selectedHoldPlaceError;
+			const holdPlace = this.placeState.selectedHoldPlace;
+			const holdPlaceLoading = this.placeState.selectedHoldPlaceLoading;
+			const holdPlaceError = this.placeState.selectedHoldPlaceError;
 			const currentUserId = this.state.user?.uid ?? null;
 			const holdOwnerId = holdPlace?.holdUserId;
 			const isSelfHolding = status === "playing" && !!currentUserId && holdOwnerId === currentUserId;
 			const isHoldable = status === "idle";
 			const isReleasable = status === "playing" && isSelfHolding;
 			const isHoldSubmitting =
-				this.topState.holdSubmitting && this.topState.holdSubmittingPlaceId === selectedPlace.id;
+				this.placeState.holdSubmitting && this.placeState.holdSubmittingPlaceId === selectedPlace.id;
 			const isReleaseSubmitting =
-				this.topState.releaseSubmitting && this.topState.releaseSubmittingPlaceId === selectedPlace.id;
+				this.placeState.releaseSubmitting && this.placeState.releaseSubmittingPlaceId === selectedPlace.id;
 			const holdButtonLabel = isHoldSubmitting ? "確保中" : "確保する";
 			const releaseButtonLabel = isReleaseSubmitting ? "解放中" : "解放する";
 			let ownerLabel = "";
@@ -497,15 +487,22 @@ export class App {
 			if (this.placeWatchId) this.stopSelectedPlaceWatch();
 			if (this.holdPlaceWatchId) this.stopSelectedHoldPlaceWatch();
 			if (
-				this.topState.selectedPlace ||
-				this.topState.selectedPlaceLoading ||
-				this.topState.selectedPlaceError ||
-				this.topState.selectedHoldPlace ||
-				this.topState.selectedHoldPlaceLoading ||
-				this.topState.selectedHoldPlaceError
+				this.placeState.placeId ||
+				this.placeState.selectedPlace ||
+				this.placeState.selectedPlaceLoading ||
+				this.placeState.selectedPlaceError ||
+				this.placeState.selectedHoldPlace ||
+				this.placeState.selectedHoldPlaceLoading ||
+				this.placeState.selectedHoldPlaceError ||
+				this.placeState.ignoreHoldPlaceId ||
+				this.placeState.holdSubmitting ||
+				this.placeState.holdSubmittingPlaceId ||
+				this.placeState.releaseSubmitting ||
+				this.placeState.releaseSubmittingPlaceId
 			) {
-				this.topState = {
-					...this.topState,
+				this.placeState = {
+					...this.placeState,
+					placeId: null,
 					selectedPlace: null,
 					selectedPlaceLoading: false,
 					selectedPlaceError: null,
@@ -513,14 +510,36 @@ export class App {
 					selectedHoldPlaceLoading: false,
 					selectedHoldPlaceError: null,
 					ignoreHoldPlaceId: null,
+					holdSubmitting: false,
+					holdSubmittingPlaceId: null,
+					releaseSubmitting: false,
+					releaseSubmittingPlaceId: null,
 				};
 			}
 			return;
 		}
 
+		if (this.placeState.placeId !== placeId) {
+			this.placeState = {
+				...this.placeState,
+				placeId,
+				selectedPlace: null,
+				selectedPlaceLoading: true,
+				selectedPlaceError: null,
+				selectedHoldPlace: null,
+				selectedHoldPlaceLoading: false,
+				selectedHoldPlaceError: null,
+				ignoreHoldPlaceId: null,
+				holdSubmitting: false,
+				holdSubmittingPlaceId: null,
+				releaseSubmitting: false,
+				releaseSubmittingPlaceId: null,
+			};
+		}
+
 		const selectedPlace =
-			this.topState.selectedPlace && this.topState.selectedPlace.id === placeId
-				? this.topState.selectedPlace
+			this.placeState.selectedPlace && this.placeState.selectedPlace.id === placeId
+				? this.placeState.selectedPlace
 				: null;
 
 		if (!selectedPlace) {
@@ -528,12 +547,12 @@ export class App {
 				this.stopSelectedHoldPlaceWatch();
 			}
 			if (
-				this.topState.selectedHoldPlace ||
-				this.topState.selectedHoldPlaceError ||
-				this.topState.selectedHoldPlaceLoading
+				this.placeState.selectedHoldPlace ||
+				this.placeState.selectedHoldPlaceError ||
+				this.placeState.selectedHoldPlaceLoading
 			) {
-				this.topState = {
-					...this.topState,
+				this.placeState = {
+					...this.placeState,
 					selectedHoldPlace: null,
 					selectedHoldPlaceLoading: false,
 					selectedHoldPlaceError: null,
@@ -548,8 +567,8 @@ export class App {
 
 			const watchId = placeId;
 			this.placeWatchId = watchId;
-			this.topState = {
-				...this.topState,
+			this.placeState = {
+				...this.placeState,
 				selectedPlace: null,
 				selectedPlaceLoading: true,
 				selectedPlaceError: null,
@@ -562,8 +581,8 @@ export class App {
 				(place) => {
 					if (this.placeWatchId !== watchId) return;
 					if (!place) {
-						this.topState = {
-							...this.topState,
+						this.placeState = {
+							...this.placeState,
 							selectedPlace: null,
 							selectedPlaceLoading: false,
 							selectedPlaceError: "選択したPlaceが見つかりません。",
@@ -571,14 +590,12 @@ export class App {
 						this.render();
 						return;
 					}
-					let nextIgnoreHoldPlaceId = this.topState.ignoreHoldPlaceId;
+					let nextIgnoreHoldPlaceId = this.placeState.ignoreHoldPlaceId;
 					if (nextIgnoreHoldPlaceId && place.currentHoldPlaceId !== nextIgnoreHoldPlaceId) {
 						nextIgnoreHoldPlaceId = null;
 					}
-					const nextPlaces = this.topState.places.map((item) => (item.id === place.id ? place : item));
-					this.topState = {
-						...this.topState,
-						places: nextPlaces,
+					this.placeState = {
+						...this.placeState,
 						selectedPlace: place,
 						selectedPlaceLoading: false,
 						selectedPlaceError: null,
@@ -588,8 +605,8 @@ export class App {
 				},
 				() => {
 					if (this.placeWatchId !== watchId) return;
-					this.topState = {
-						...this.topState,
+					this.placeState = {
+						...this.placeState,
 						selectedPlaceLoading: false,
 						selectedPlaceError: "Placeの監視に失敗しました。",
 					};
@@ -600,27 +617,19 @@ export class App {
 		}
 
 		let holdPlaceId = selectedPlace.currentHoldPlaceId;
-		if (holdPlaceId && holdPlaceId === this.topState.ignoreHoldPlaceId) {
+		if (holdPlaceId && holdPlaceId === this.placeState.ignoreHoldPlaceId) {
 			holdPlaceId = undefined;
 		}
 		if (holdPlaceId) {
 			if (this.placeWatchId) this.stopSelectedPlaceWatch();
 			if (this.holdPlaceWatchId === holdPlaceId) {
-				if (!this.topState.selectedPlace || this.topState.selectedPlace.id !== selectedPlace.id) {
-					this.topState = {
-						...this.topState,
-						selectedPlace,
-						selectedPlaceLoading: false,
-						selectedPlaceError: null,
-					};
-				}
 				return;
 			}
 
 			this.stopSelectedHoldPlaceWatch();
 			this.holdPlaceWatchId = holdPlaceId;
-			this.topState = {
-				...this.topState,
+			this.placeState = {
+				...this.placeState,
 				selectedPlace,
 				selectedPlaceLoading: false,
 				selectedPlaceError: null,
@@ -637,20 +646,19 @@ export class App {
 				(holdPlace) => {
 					if (this.holdPlaceWatchId !== watchHoldId) return;
 					if (!holdPlace) {
-						const nextPlaces = this.topState.places.map((item) =>
-							item.id === watchPlaceId ? { ...item, currentHoldPlaceId: undefined } : item,
-						);
-						this.topState = {
-							...this.topState,
+						const baseSelectedPlace =
+							this.placeState.selectedPlace?.id === watchPlaceId
+								? this.placeState.selectedPlace
+								: selectedPlace;
+						this.placeState = {
+							...this.placeState,
 							ignoreHoldPlaceId: watchHoldId,
-							places: nextPlaces,
 							selectedHoldPlace: null,
 							selectedHoldPlaceLoading: false,
 							selectedHoldPlaceError: "HoldPlaceが見つかりません。",
-							selectedPlace: {
-								...selectedPlace,
-								currentHoldPlaceId: undefined,
-							},
+							selectedPlace: baseSelectedPlace
+								? { ...baseSelectedPlace, currentHoldPlaceId: undefined }
+								: null,
 						};
 						this.stopSelectedHoldPlaceWatch();
 						this.render();
@@ -658,33 +666,34 @@ export class App {
 					}
 
 					if (holdPlace.endedAt) {
-						const nextPlaces = this.topState.places.map((item) =>
-							item.id === watchPlaceId ? { ...item, currentHoldPlaceId: undefined } : item,
-						);
-						this.topState = {
-							...this.topState,
+						const baseSelectedPlace =
+							this.placeState.selectedPlace?.id === watchPlaceId
+								? this.placeState.selectedPlace
+								: selectedPlace;
+						this.placeState = {
+							...this.placeState,
 							ignoreHoldPlaceId: watchHoldId,
-							places: nextPlaces,
 							selectedHoldPlace: holdPlace,
 							selectedHoldPlaceLoading: false,
 							selectedHoldPlaceError: null,
-							selectedPlace: {
-								...selectedPlace,
-								currentHoldPlaceId: undefined,
-							},
+							selectedPlace: baseSelectedPlace
+								? { ...baseSelectedPlace, currentHoldPlaceId: undefined }
+								: null,
 						};
 						this.stopSelectedHoldPlaceWatch();
 						this.render();
 						return;
 					}
 
-					const nextPlaces = this.topState.places.map((item) =>
-						item.id === watchPlaceId ? { ...item, currentHoldPlaceId: watchHoldId } : item,
-					);
-					this.topState = {
-						...this.topState,
-						places: nextPlaces,
-						selectedPlace,
+					const baseSelectedPlace =
+						this.placeState.selectedPlace?.id === watchPlaceId
+							? this.placeState.selectedPlace
+							: selectedPlace;
+					this.placeState = {
+						...this.placeState,
+						selectedPlace: baseSelectedPlace
+							? { ...baseSelectedPlace, currentHoldPlaceId: watchHoldId }
+							: null,
 						selectedHoldPlace: holdPlace,
 						selectedHoldPlaceLoading: false,
 						selectedHoldPlaceError: null,
@@ -693,8 +702,8 @@ export class App {
 				},
 				() => {
 					if (this.holdPlaceWatchId !== watchHoldId) return;
-					this.topState = {
-						...this.topState,
+					this.placeState = {
+						...this.placeState,
 						selectedHoldPlaceLoading: false,
 						selectedHoldPlaceError: "HoldPlaceの監視に失敗しました。",
 					};
@@ -708,12 +717,12 @@ export class App {
 			this.stopSelectedHoldPlaceWatch();
 		}
 		if (
-			this.topState.selectedHoldPlace ||
-			this.topState.selectedHoldPlaceError ||
-			this.topState.selectedHoldPlaceLoading
+			this.placeState.selectedHoldPlace ||
+			this.placeState.selectedHoldPlaceError ||
+			this.placeState.selectedHoldPlaceLoading
 		) {
-			this.topState = {
-				...this.topState,
+			this.placeState = {
+				...this.placeState,
 				selectedHoldPlace: null,
 				selectedHoldPlaceLoading: false,
 				selectedHoldPlaceError: null,
@@ -721,14 +730,6 @@ export class App {
 		}
 
 		if (this.placeWatchId === selectedPlace.id) {
-			if (!this.topState.selectedPlace || this.topState.selectedPlace.id !== selectedPlace.id) {
-				this.topState = {
-					...this.topState,
-					selectedPlace,
-					selectedPlaceLoading: false,
-					selectedPlaceError: null,
-				};
-			}
 			return;
 		}
 
@@ -736,8 +737,8 @@ export class App {
 
 		const watchId = selectedPlace.id;
 		this.placeWatchId = watchId;
-		this.topState = {
-			...this.topState,
+		this.placeState = {
+			...this.placeState,
 			selectedPlace,
 			selectedPlaceLoading: true,
 			selectedPlaceError: null,
@@ -749,8 +750,8 @@ export class App {
 			(place) => {
 				if (this.placeWatchId !== watchId) return;
 				if (!place) {
-					this.topState = {
-						...this.topState,
+					this.placeState = {
+						...this.placeState,
 						selectedPlace: null,
 						selectedPlaceLoading: false,
 						selectedPlaceError: "選択したPlaceが見つかりません。",
@@ -758,14 +759,12 @@ export class App {
 					this.render();
 					return;
 				}
-				let nextIgnoreHoldPlaceId = this.topState.ignoreHoldPlaceId;
+				let nextIgnoreHoldPlaceId = this.placeState.ignoreHoldPlaceId;
 				if (nextIgnoreHoldPlaceId && place.currentHoldPlaceId !== nextIgnoreHoldPlaceId) {
 					nextIgnoreHoldPlaceId = null;
 				}
-				const nextPlaces = this.topState.places.map((item) => (item.id === place.id ? place : item));
-				this.topState = {
-					...this.topState,
-					places: nextPlaces,
+				this.placeState = {
+					...this.placeState,
 					selectedPlace: place,
 					selectedPlaceLoading: false,
 					selectedPlaceError: null,
@@ -775,8 +774,8 @@ export class App {
 			},
 			() => {
 				if (this.placeWatchId !== watchId) return;
-				this.topState = {
-					...this.topState,
+				this.placeState = {
+					...this.placeState,
 					selectedPlaceLoading: false,
 					selectedPlaceError: "Placeの監視に失敗しました。",
 				};
@@ -786,9 +785,9 @@ export class App {
 	}
 
 	async handleHoldPlace(placeId: string) {
-		if (this.topState.holdSubmitting) return;
-		this.topState = {
-			...this.topState,
+		if (this.placeState.holdSubmitting) return;
+		this.placeState = {
+			...this.placeState,
 			holdSubmitting: true,
 			holdSubmittingPlaceId: placeId,
 		};
@@ -796,13 +795,17 @@ export class App {
 		try {
 			await holdPlace(this.client, placeId);
 			this.showToast("確保しました。", "success");
+			this.topState = {
+				...this.topState,
+				loaded: false,
+			};
 		} catch (err) {
 			const message = err instanceof Error ? err.message : "確保に失敗しました。";
 			this.showToast(message, "error");
 		} finally {
-			if (this.topState.holdSubmittingPlaceId === placeId) {
-				this.topState = {
-					...this.topState,
+			if (this.placeState.holdSubmittingPlaceId === placeId) {
+				this.placeState = {
+					...this.placeState,
 					holdSubmitting: false,
 					holdSubmittingPlaceId: null,
 				};
@@ -812,9 +815,9 @@ export class App {
 	}
 
 	async handleReleasePlace(placeId: string) {
-		if (this.topState.releaseSubmitting) return;
-		this.topState = {
-			...this.topState,
+		if (this.placeState.releaseSubmitting) return;
+		this.placeState = {
+			...this.placeState,
 			releaseSubmitting: true,
 			releaseSubmittingPlaceId: placeId,
 		};
@@ -822,18 +825,14 @@ export class App {
 		try {
 			await releasePlace(this.client, placeId);
 			this.showToast("解放しました。", "success");
-			const currentHoldPlaceId = this.topState.selectedPlace?.currentHoldPlaceId;
+			const currentHoldPlaceId = this.placeState.selectedPlace?.currentHoldPlaceId;
 			if (currentHoldPlaceId) {
 				this.stopSelectedHoldPlaceWatch();
-				const nextPlaces = this.topState.places.map((item) =>
-					item.id === placeId ? { ...item, currentHoldPlaceId: undefined } : item,
-				);
-				this.topState = {
-					...this.topState,
-					places: nextPlaces,
-					selectedPlace: this.topState.selectedPlace
-						? { ...this.topState.selectedPlace, currentHoldPlaceId: undefined }
-						: this.topState.selectedPlace,
+				this.placeState = {
+					...this.placeState,
+					selectedPlace: this.placeState.selectedPlace
+						? { ...this.placeState.selectedPlace, currentHoldPlaceId: undefined }
+						: this.placeState.selectedPlace,
 					selectedHoldPlace: null,
 					selectedHoldPlaceLoading: false,
 					selectedHoldPlaceError: null,
@@ -841,42 +840,23 @@ export class App {
 				};
 				this.render();
 			}
+			this.topState = {
+				...this.topState,
+				loaded: false,
+			};
 		} catch (err) {
 			const message = err instanceof Error ? err.message : "解放に失敗しました。";
 			this.showToast(message, "error");
 		} finally {
-			if (this.topState.releaseSubmittingPlaceId === placeId) {
-				this.topState = {
-					...this.topState,
+			if (this.placeState.releaseSubmittingPlaceId === placeId) {
+				this.placeState = {
+					...this.placeState,
 					releaseSubmitting: false,
 					releaseSubmittingPlaceId: null,
 				};
 				this.render();
 			}
 		}
-	}
-
-	updateTopUrl(next: { x?: number; y?: number }) {
-		const url = new URL(location.href);
-		if (typeof next.x === "number" && Number.isFinite(next.x)) {
-			url.searchParams.set("x", String(next.x));
-		} else {
-			url.searchParams.delete("x");
-		}
-		if (typeof next.y === "number" && Number.isFinite(next.y)) {
-			url.searchParams.set("y", String(next.y));
-		} else {
-			url.searchParams.delete("y");
-		}
-		if (Number.isFinite(this.topState.zoom)) {
-			url.searchParams.set("z", String(this.topState.zoom));
-		} else {
-			url.searchParams.set("z", "1");
-		}
-		if (utils.isDebugMode()) {
-			url.searchParams.set("debug", "true");
-		}
-		history.replaceState({}, "", url.toString());
 	}
 
 	async loadPlaces() {
@@ -905,17 +885,6 @@ export class App {
 	}
 
 	bindTopEvents() {
-		const searchInput = this.rootEl.querySelector<HTMLInputElement>("#top-search-input");
-		if (!searchInput) return;
-		searchInput.addEventListener("input", () => {
-			this.topState = {
-				...this.topState,
-				query: searchInput.value,
-				lastFocus: "search",
-			};
-			this.render();
-		});
-
 		const placeCards = Array.from(this.rootEl.querySelectorAll<HTMLDivElement>(".top-place-card"));
 		placeCards.forEach((card) => {
 			const placeId = card.dataset.placeId;
@@ -951,17 +920,6 @@ export class App {
 				void this.handleReleasePlace(placeId);
 			});
 		}
-	}
-
-	restoreTopFocus() {
-		if (this.topState.lastFocus !== "search") return;
-		const searchInput = this.rootEl.querySelector<HTMLInputElement>("#top-search-input");
-		if (searchInput) {
-			searchInput.focus();
-			searchInput.selectionStart = searchInput.value.length;
-			searchInput.selectionEnd = searchInput.value.length;
-		}
-		this.topState.lastFocus = null;
 	}
 
 	getDefaultProfile(user: FirebaseUser): FirestoreUser {
