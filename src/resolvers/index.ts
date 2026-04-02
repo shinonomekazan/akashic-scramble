@@ -2,6 +2,9 @@ import { collection, doc, getDoc, getDocs, onSnapshot, type Firestore, type Unsu
 import type { HoldPlace } from "../types/holdPlace";
 import type { Place, PlaceBehaviour } from "../types/place";
 import type { User } from "../types";
+import * as manage from "./manage";
+
+export { manage };
 
 function normalizePlace(id: string, data: Partial<Place> | undefined): Place {
 	return {

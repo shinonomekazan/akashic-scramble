@@ -24,3 +24,5 @@ export async function signInWithGoogle(firebase: FirebaseInstance): Promise<User
 export async function signOutCurrentUser(firebase: FirebaseInstance): Promise<void> {
 	await signOut(firebase.auth);
 }
+
+export type { User };
