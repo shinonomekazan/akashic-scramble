@@ -162,7 +162,6 @@ export class App {
 			const gridMetrics = this.getGridMetrics(this.topState.places);
 			this.applyTopGridLayout(gridMetrics);
 		});
-		this.render();
 	}
 
 	connectEmulatorIfDebug() {
@@ -274,8 +273,8 @@ export class App {
 
 	renderTop() {
 		const user = this.state.user;
-		if (!user) {
-			utils.navigateTo("/login");
+		if (user && this.state.profileLoaded && this.state.needsProfile) {
+			utils.navigateTo("/my");
 			return;
 		}
 		this.syncTopCameraFromUrl();
@@ -1110,7 +1109,9 @@ export class App {
 				error: message,
 			};
 		} finally {
-			this.render();
+			if (!this.state.profileLoading) {
+				this.render();
+			}
 		}
 	}
 
@@ -1532,6 +1533,12 @@ export class App {
 					profileLoading: false,
 					needsProfile: true,
 				};
+				const route = utils.parseRoute();
+				if (route.name !== "my" && route.name !== "my-edit") {
+					utils.navigateTo("/my");
+				} else {
+					this.render();
+				}
 				return;
 			}
 			this.state = {
@@ -1551,7 +1558,9 @@ export class App {
 				needsProfile: false,
 			};
 		} finally {
-			this.render();
+			if (!this.topState.loading) {
+				this.render();
+			}
 		}
 	}
 
@@ -1584,8 +1593,10 @@ export class App {
 			? (profile?.name ?? (this.state.profileLoading ? "読み込み中" : "未設定"))
 			: "ゲスト";
 		const userIdRow = isSignedIn ? `<li class="as-menu-item">ユーザーID: ${user.uid}</li>` : "";
+		const route = utils.parseRoute();
+		const isMyPage = route.name === "my" || route.name === "my-edit";
 		const myPageRow = isSignedIn
-			? '<li class="as-menu-item"><button id="menu-my" class="as-menu-link" type="button">マイページ</button></li>'
+			? `<li class="as-menu-item"><button id="menu-my" class="as-menu-link" type="button">${isMyPage ? "トップページ" : "マイページ"}</button></li>`
 			: "";
 		const authLabel = isSignedIn ? "ログアウト" : "ログイン";
 		const suffix = utils.isDebugMode() ? "?debug=true" : "";
@@ -1668,7 +1679,9 @@ export class App {
 		if (myPageButton) {
 			myPageButton.addEventListener("click", () => {
 				menuContainer.classList.remove("open");
-				utils.navigateTo("/my");
+				const route = utils.parseRoute();
+				const isMyPage = route.name === "my" || route.name === "my-edit";
+				utils.navigateTo(isMyPage ? "/" : "/my");
 			});
 		}
 	}
