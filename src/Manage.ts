@@ -40,7 +40,7 @@ export class Manage extends App {
 	}
 
 	async canUseManageTool(user: FirebaseUser): Promise<boolean> {
-		const manageUser = await manage.resolvers(this.firebase.firestore, user.uid);
+		const manageUser = await manage.getManageUser(this.firebase.firestore, user.uid);
 		if (manageUser?.role === "administrator") {
 			await this.ensureManageClaims(user);
 			return true;

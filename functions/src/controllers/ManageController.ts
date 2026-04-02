@@ -17,7 +17,7 @@ export class ManageController extends BaseController {
 
 		this.registerRoute(router, "POST", "/:id/authenticate", this.authenticate, [
 			fw.params.InstantValidator(
-				[params.headerBearerTokenValidatorOptional(), validators.param("id").isString().notEmpty()],
+				[params.headerBearerTokenValidator(), validators.param("id").isString().notEmpty()],
 				(context) =>
 					({
 						authorization: context.req.headers.authorization,
