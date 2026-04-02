@@ -397,3 +397,45 @@ body {
 		--top-tile-height-min: 116;
 	}
 }
+
+.manage-page {
+	min-height: 100vh;
+	padding: 32px 16px;
+}
+
+.manage-top {
+	text-align: center;
+}
+
+.manage-title {
+	margin: 0;
+	line-height: 1.2;
+	font-weight: 700;
+}
+
+.manage-title-main {
+	display: block;
+	font-size: clamp(1.4rem, 4vw, 2rem);
+}
+
+.manage-title-sub {
+	display: block;
+	font-size: clamp(1.35rem, 3.7vw, 1.95rem);
+}
+
+.manage-error-message {
+	margin: 14px 0 0;
+	font-size: 0.98rem;
+	font-weight: 600;
+	color: red;
+}
+
+@media (max-width: 640px) {
+	.manage-page {
+		padding: 24px 14px;
+	}
+
+	.manage-buttons {
+		max-width: 300px;
+	}
+}

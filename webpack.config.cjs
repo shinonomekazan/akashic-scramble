@@ -3,22 +3,8 @@ const TerserPlugin = require("terser-webpack-plugin");
 const Dotenv = require("dotenv-webpack");
 
 const commonConfig = () => {
-	return {
+	const config = {
 		mode: "none",
-		entry: {
-			main: "./src/App.ts",
-		},
-		output: {
-			path: path.resolve(__dirname, "public", "js"),
-			filename: (pathData) => {
-				return pathData.chunk.name === "vendor" ? "vendor.bundle.js" : "akashic.bundle.js";
-			},
-			library: {
-				name: "app",
-				type: "window",
-			},
-			clean: true,
-		},
 		module: {
 			rules: [
 				{
@@ -29,6 +15,10 @@ const commonConfig = () => {
 				{
 					test: /\.css$/,
 					use: ["style-loader", "css-loader"],
+				},
+				{
+					test: /\.svg$/,
+					type: "asset/source",
 				},
 			],
 		},
@@ -64,6 +54,40 @@ const commonConfig = () => {
 			},
 		},
 	};
+	return config;
 };
 
-module.exports = (env, argv) => commonConfig(env, argv);
+const akashicConfig = () => {
+	const config = commonConfig();
+	config.entry = {
+		main: "./src/App.ts",
+	};
+	config.output = {
+		path: path.resolve(__dirname, "public", "js"),
+		filename: (pathData) => {
+			return pathData.chunk.name === "vendor" ? "vendor.bundle.js" : "akashic.bundle.js";
+		},
+		library: {
+			name: "app",
+			type: "window",
+		},
+		clean: true,
+	};
+	return config;
+};
+
+const manageConfig = () => {
+	const config = commonConfig();
+	config.optimization.splitChunks = false;
+	config.entry = {
+		manage: "./src/Manage.ts",
+	};
+	config.output = {
+		path: path.resolve(__dirname, "public", "js"),
+		filename: "[name].bundle.js",
+		library: "[name]",
+	};
+	return config;
+};
+
+module.exports = [akashicConfig, manageConfig];
