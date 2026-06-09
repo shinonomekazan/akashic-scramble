@@ -10,6 +10,7 @@ export function register(app: App) {
 		"/": controllers.SystemController,
 		"/users": controllers.UsersController,
 		"/places": controllers.PlacesController,
+		"/holdPlaces": controllers.HoldPlacesController,
 		"/manage": controllers.ManageController,
 	});
 

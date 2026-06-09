@@ -28,7 +28,8 @@ export type Route =
 	| { name: "my" }
 	| { name: "my-edit" }
 	| { name: "top" }
-	| { name: "place"; placeId: string };
+	| { name: "place"; placeId: string }
+	| { name: "play"; holdPlaceId: string };
 
 export function parseRoute(): Route {
 	const path = window.location.pathname || "/";
@@ -36,6 +37,12 @@ export function parseRoute(): Route {
 		const placeId = decodeURIComponent(path.replace("/place/", ""));
 		if (placeId) {
 			return { name: "place", placeId };
+		}
+	}
+	if (path.startsWith("/play/")) {
+		const holdPlaceId = decodeURIComponent(path.replace("/play/", ""));
+		if (holdPlaceId) {
+			return { name: "play", holdPlaceId };
 		}
 	}
 	if (path.startsWith("/my/edit")) {
