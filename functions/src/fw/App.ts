@@ -27,11 +27,7 @@ export class App<T extends AppConfig> {
 					.concat(customHeaders ?? [])
 					.join(", "),
 			);
-			res.header("Access-Control-Allow-Methods", "POST, GET, PUT, DELETE, OPTIONS");
-			if (req.method === "OPTIONS") {
-				res.sendStatus(204);
-				return;
-			}
+			res.header("Access-Control-Allow-Methods", "POST, GET, PUT, DELETE");
 			next();
 		});
 	}

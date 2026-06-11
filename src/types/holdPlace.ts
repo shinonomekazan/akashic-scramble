@@ -7,12 +7,6 @@ export interface HoldPlace {
 	behaviours: PlaceBehaviour[];
 	holdUserId?: string;
 	currentPlayId?: string;
-	currentPlayGameCode?: string;
-	currentPlayTitle?: string;
-	currentPlayDescription?: string;
-	currentPlayContentUrl?: string;
-	currentPlayInputAdapter?: string;
-	activeUserId?: string;
 	expireAt?: Timestamp;
 	endedAt?: Timestamp;
 }

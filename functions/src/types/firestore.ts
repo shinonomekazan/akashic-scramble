@@ -90,18 +90,6 @@ export interface HoldPlace {
 	 */
 	currentPlayId?: string;
 
-	currentPlayGameCode?: string;
-
-	currentPlayTitle?: string;
-
-	currentPlayDescription?: string;
-
-	currentPlayContentUrl?: string;
-
-	currentPlayInputAdapter?: string;
-
-	activeUserId?: string;
-
 	/**
 	 * HoldPlaceの有効期限。
 	 * Timestamp型だが、分が最小単位であることが保証される。
