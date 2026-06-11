@@ -9,6 +9,7 @@ import { AppConfig, Config } from "./config";
 import * as fw from "./fw";
 import { register } from "./register";
 import { expireHoldPlace } from "./stores";
+import { AkashicSystemClient } from "./services/akashicSystem";
 
 let app: App | undefined = undefined;
 let firebaseApp: FirebaseApp | undefined = undefined;
@@ -71,9 +72,16 @@ export const expireHoldPlaces = onSchedule({ region: "asia-northeast1", schedule
 	if (snapshot.empty) return;
 
 	for (const doc of snapshot.docs) {
-		await expireHoldPlace(firestore, {
+		const endedHoldPlace = await expireHoldPlace(firestore, {
 			holdPlaceId: doc.id,
 			now,
 		});
+		if (endedHoldPlace?.currentPlayId && process.env.AKASHIC_SYSTEM_API_KEY) {
+			try {
+				await new AkashicSystemClient().stopPlay(endedHoldPlace.currentPlayId);
+			} catch (error) {
+				console.warn(error);
+			}
+		}
 	}
 });

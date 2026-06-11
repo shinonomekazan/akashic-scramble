@@ -24,6 +24,14 @@ function normalizeHoldPlace(id: string, data: Partial<HoldPlace> | undefined): H
 		behaviours: Array.isArray(data?.behaviours) ? (data.behaviours as PlaceBehaviour[]) : [],
 		holdUserId: typeof data?.holdUserId === "string" ? data.holdUserId : undefined,
 		currentPlayId: typeof data?.currentPlayId === "string" ? data.currentPlayId : undefined,
+		currentPlayGameCode: typeof data?.currentPlayGameCode === "string" ? data.currentPlayGameCode : undefined,
+		currentPlayTitle: typeof data?.currentPlayTitle === "string" ? data.currentPlayTitle : undefined,
+		currentPlayDescription:
+			typeof data?.currentPlayDescription === "string" ? data.currentPlayDescription : undefined,
+		currentPlayContentUrl: typeof data?.currentPlayContentUrl === "string" ? data.currentPlayContentUrl : undefined,
+		currentPlayInputAdapter:
+			typeof data?.currentPlayInputAdapter === "string" ? data.currentPlayInputAdapter : undefined,
+		activeUserId: typeof data?.activeUserId === "string" ? data.activeUserId : undefined,
 		expireAt: data?.expireAt,
 		endedAt: data?.endedAt,
 	};
