@@ -33,7 +33,7 @@ type AuthState = {
 type PlaceStatus = "playing" | "idle";
 
 const fixedGameTitle = "Rocket Game";
-const fixedGameDescription = "ロケットを操作して遊ぶAkashicコンテンツです。";
+const fixedGameDescription = "";
 
 type TopState = {
 	places: Place[];
@@ -910,6 +910,12 @@ export class App {
 			const joinUrl = holdPlace ? new URL(`/play/${encodeURIComponent(holdPlace.id)}`, location.origin).toString() : "";
 			const currentGameTitle = holdPlace?.currentPlayTitle || holdPlace?.currentPlayGameCode || fixedGameTitle;
 			const currentGameDescription = holdPlace?.currentPlayDescription || fixedGameDescription;
+			const currentGameDescriptionMarkup = currentGameDescription
+				? `<div class="small text-secondary mb-2">${utils.escapeHtml(currentGameDescription)}</div>`
+				: "";
+			const fixedGameDescriptionMarkup = fixedGameDescription
+				? `<div class="small text-secondary mb-2">${utils.escapeHtml(fixedGameDescription)}</div>`
+				: "";
 			const expireText = this.formatDateTime(holdPlace?.expireAt);
 			let playMarkup = "";
 			if (status === "playing" && holdPlace && !holdPlaceLoading && !holdPlaceError) {
@@ -918,7 +924,7 @@ export class App {
 						<div class="mt-3 p-3 border rounded-3 bg-light">
 							<div class="fw-semibold mb-1">${utils.escapeHtml(currentGameTitle)}</div>
 							<div class="small text-muted mb-2">Play ID: ${utils.escapeHtml(holdPlace.currentPlayId)}</div>
-							<div class="small text-secondary mb-2">${utils.escapeHtml(currentGameDescription)}</div>
+							${currentGameDescriptionMarkup}
 							${expireText ? `<div class="small text-muted mb-2">このPlayは ${utils.escapeHtml(expireText)} まで遊べます。</div>` : ""}
 							<div class="small text-break mb-2">${utils.escapeHtml(joinUrl)}</div>
 							<div class="d-flex flex-wrap gap-2">
@@ -945,7 +951,7 @@ export class App {
 						<div class="mt-3 p-3 border rounded-3 bg-light">
 							<div class="small text-muted mb-1">選択中のゲーム</div>
 							<div class="fw-semibold mb-1">${utils.escapeHtml(fixedGameTitle)}</div>
-							<div class="small text-secondary mb-2">${utils.escapeHtml(fixedGameDescription)}</div>
+							${fixedGameDescriptionMarkup}
 							<button id="place-start-play-button" class="btn btn-primary btn-sm" data-place-id="${utils.escapeHtml(
 								selectedPlace.id,
 							)}" ${playStarting ? "disabled" : ""} type="button">${playStarting ? "開始中..." : "遊ぶ"}</button>

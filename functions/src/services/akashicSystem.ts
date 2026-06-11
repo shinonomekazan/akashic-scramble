@@ -75,8 +75,7 @@ export function loadAkashicSystemConfig(): AkashicSystemConfig {
 		gamePageUrl: process.env.AKASHIC_SYSTEM_GAME_PAGE_URL ?? "https://akashic-system.shinonomekazan.com/contents/index.html",
 		defaultGameCode: process.env.SCRAMBLE_AKASHIC_GAME_CODE ?? "rocket-game",
 		defaultGameTitle: process.env.SCRAMBLE_AKASHIC_GAME_TITLE ?? "Rocket Game",
-		defaultGameDescription:
-			process.env.SCRAMBLE_AKASHIC_GAME_DESCRIPTION ?? "ロケットを操作して遊ぶAkashicコンテンツです。",
+		defaultGameDescription: process.env.SCRAMBLE_AKASHIC_GAME_DESCRIPTION ?? "",
 		defaultContentUrl: process.env.SCRAMBLE_AKASHIC_CONTENT_URL ?? "/contents/rocket-game/content.json",
 		defaultInputAdapter: process.env.SCRAMBLE_AKASHIC_INPUT_ADAPTER ?? "rocket-game",
 	};
