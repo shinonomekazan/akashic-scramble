@@ -89,11 +89,11 @@ export class PlacesController extends BaseController {
 				holdPlaceId: target.holdPlaceId,
 				placeId: target.placeId,
 				playId: target.currentPlayId,
-				gameCode: target.currentPlayGameCode ?? config.defaultGameCode,
-				gameTitle: target.currentPlayTitle ?? config.defaultGameTitle,
-				gameDescription: target.currentPlayDescription ?? config.defaultGameDescription,
-				contentUrl: target.currentPlayContentUrl ?? config.defaultContentUrl,
-				inputAdapter: target.currentPlayInputAdapter ?? config.defaultInputAdapter,
+				gameCode: target.gameCode ?? config.defaultGameCode,
+				gameTitle: target.gameTitle ?? config.defaultGameTitle,
+				gameDescription: target.gameDescription ?? config.defaultGameDescription,
+				contentUrl: target.contentUrl ?? config.defaultContentUrl,
+				inputAdapter: target.inputAdapter ?? config.defaultInputAdapter,
 				expireAt: target.expireAt?.toDate().toISOString(),
 				joinPath: `/play/${encodeURIComponent(target.holdPlaceId)}`,
 			};
@@ -109,12 +109,14 @@ export class PlacesController extends BaseController {
 				holdPlaceId: target.holdPlaceId,
 				holdUserId: verifyResult.uid,
 				systemPlayId: createdPlay.id,
+				providerId: game.providerId,
+				contentCode: game.contentCode,
 				gameCode,
 				gameTitle: game.title,
 				gameDescription: game.description,
 				contentUrl: game.contentUrl,
 				inputAdapter: config.defaultInputAdapter,
-				activeUserId: verifyResult.uid,
+				ownerUserId: verifyResult.uid,
 			});
 
 			if (storedPlay.currentPlayId !== createdPlay.id) {
@@ -129,11 +131,11 @@ export class PlacesController extends BaseController {
 			holdPlaceId: storedPlay.holdPlaceId,
 			placeId: storedPlay.placeId,
 			playId: storedPlay.currentPlayId,
-			gameCode: storedPlay.currentPlayGameCode ?? gameCode,
-			gameTitle: storedPlay.currentPlayTitle ?? config.defaultGameTitle,
-			gameDescription: storedPlay.currentPlayDescription ?? config.defaultGameDescription,
-			contentUrl: storedPlay.currentPlayContentUrl ?? config.defaultContentUrl,
-			inputAdapter: storedPlay.currentPlayInputAdapter ?? config.defaultInputAdapter,
+			gameCode: storedPlay.gameCode ?? gameCode,
+			gameTitle: storedPlay.gameTitle ?? config.defaultGameTitle,
+			gameDescription: storedPlay.gameDescription ?? config.defaultGameDescription,
+			contentUrl: storedPlay.contentUrl ?? config.defaultContentUrl,
+			inputAdapter: storedPlay.inputAdapter ?? config.defaultInputAdapter,
 			expireAt: storedPlay.expireAt?.toDate().toISOString(),
 			joinPath: `/play/${encodeURIComponent(storedPlay.holdPlaceId)}`,
 		};
@@ -152,6 +154,8 @@ export class PlacesController extends BaseController {
 		const gameDriveConfig = loadGameDriveConfig();
 		if (!gameDriveConfig.contentId) {
 			return {
+				providerId: "akashic-system",
+				contentCode: config.defaultGameCode,
 				gameCode: config.defaultGameCode,
 				title: config.defaultGameTitle,
 				description: config.defaultGameDescription,
@@ -161,6 +165,8 @@ export class PlacesController extends BaseController {
 
 		const content = await new GameDriveClient(gameDriveConfig).resolveContent(gameDriveConfig.contentId);
 		return {
+			providerId: "akashic-game-drive",
+			contentCode: content.contentId,
 			gameCode: `game-drive-${content.contentId}`,
 			title: content.title,
 			description: content.description,

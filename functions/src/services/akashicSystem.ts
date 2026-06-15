@@ -1,6 +1,3 @@
-import * as http from "http";
-import * as https from "https";
-
 export type AkashicExecutionMode = "active" | "passive";
 
 export interface AkashicPlay {
@@ -81,46 +78,32 @@ export function loadAkashicSystemConfig(): AkashicSystemConfig {
 	};
 }
 
-function requestJson<T>(url: string, options: https.RequestOptions, body?: unknown): Promise<T> {
-	return new Promise((resolve, reject) => {
-		const parsedUrl = new URL(url);
-		const transport = parsedUrl.protocol === "http:" ? http : https;
-		const payload = body == null ? undefined : JSON.stringify(body);
-		const request = transport.request(
-			parsedUrl,
-			{
-				...options,
-				headers: {
-					Accept: "application/json",
-					"Content-Type": "application/json; charset=utf-8",
-					...(payload != null ? { "Content-Length": Buffer.byteLength(payload) } : {}),
-					...(options.headers ?? {}),
-				},
-			},
-			(response) => {
-				const chunks: Buffer[] = [];
-				response.on("data", (chunk: Buffer) => chunks.push(chunk));
-				response.on("end", () => {
-					const text = Buffer.concat(chunks).toString("utf8");
-					let json: T;
-					try {
-						json = text ? (JSON.parse(text) as T) : ({} as T);
-					} catch (error) {
-						reject(new Error(`Akashic System returned invalid JSON: ${text.slice(0, 120)}`));
-						return;
-					}
-					if (response.statusCode == null || response.statusCode < 200 || response.statusCode >= 300) {
-						reject(new Error(`Akashic System API error: HTTP ${response.statusCode} ${text.slice(0, 120)}`));
-						return;
-					}
-					resolve(json);
-				});
-			},
-		);
-		request.on("error", reject);
-		if (payload != null) request.write(payload);
-		request.end();
+async function requestJson<T>(
+	url: string,
+	options: { method: string; headers?: Record<string, string> },
+	body?: unknown,
+): Promise<T> {
+	const payload = body == null ? undefined : JSON.stringify(body);
+	const response = await fetch(url, {
+		method: options.method,
+		headers: {
+			Accept: "application/json",
+			"Content-Type": "application/json; charset=utf-8",
+			...(options.headers ?? {}),
+		},
+		body: payload,
 	});
+	const text = await response.text();
+	let json: T;
+	try {
+		json = text ? (JSON.parse(text) as T) : ({} as T);
+	} catch (error) {
+		throw new Error(`Akashic System returned invalid JSON: ${text.slice(0, 120)}`);
+	}
+	if (!response.ok) {
+		throw new Error(`Akashic System API error: HTTP ${response.status} ${text.slice(0, 120)}`);
+	}
+	return json;
 }
 
 export class AkashicSystemClient {

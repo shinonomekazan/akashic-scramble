@@ -1,11 +1,14 @@
 import type { Client } from "./client";
 
 export async function holdPlace(client: Client, placeId: string) {
-	return client.callWithAuthorization<{ holdPlaceId: string }>("POST", `/places/${placeId}/hold`);
+	return client.callWithAuthorization<{ holdPlaceId: string }>(
+		"POST",
+		`/places/${encodeURIComponent(placeId)}/hold`,
+	);
 }
 
 export async function releasePlace(client: Client, placeId: string) {
-	return client.callWithAuthorization<{ result: string }>("POST", `/places/${placeId}/release`);
+	return client.callWithAuthorization<{ result: string }>("POST", `/places/${encodeURIComponent(placeId)}/release`);
 }
 
 export interface StartPlacePlayResult {
@@ -39,16 +42,22 @@ export interface LaunchHoldPlacePlayResult {
 }
 
 export async function startPlacePlay(client: Client, placeId: string) {
-	return client.callWithAuthorization<StartPlacePlayResult>("POST", `/places/${placeId}/play/start`);
+	return client.callWithAuthorization<StartPlacePlayResult>(
+		"POST",
+		`/places/${encodeURIComponent(placeId)}/play/start`,
+	);
 }
 
 export async function launchHoldPlacePlay(client: Client, holdPlaceId: string) {
-	return client.callWithAuthorization<LaunchHoldPlacePlayResult>("POST", `/holdPlaces/${holdPlaceId}/play/launch`);
+	return client.callWithAuthorization<LaunchHoldPlacePlayResult>(
+		"POST",
+		`/holdPlaces/${encodeURIComponent(holdPlaceId)}/play/launch`,
+	);
 }
 
 export async function endHoldPlacePlay(client: Client, holdPlaceId: string) {
 	return client.callWithAuthorization<{ result: string; holdPlaceId: string; placeId?: string; playId?: string }>(
 		"POST",
-		`/holdPlaces/${holdPlaceId}/play/end`,
+		`/holdPlaces/${encodeURIComponent(holdPlaceId)}/play/end`,
 	);
 }

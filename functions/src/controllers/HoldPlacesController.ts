@@ -48,7 +48,7 @@ export class HoldPlacesController extends BaseController {
 			holdPlaceId: p.id,
 		});
 		const config = loadAkashicSystemConfig();
-		const mode: AkashicExecutionMode = playInfo.activeUserId === verifyResult.uid ? "active" : "passive";
+		const mode: AkashicExecutionMode = playInfo.ownerUserId === verifyResult.uid ? "active" : "passive";
 		const userId = `scramble-${verifyResult.uid}`;
 		const token = await new AkashicSystemClient(config).createToken(playInfo.currentPlayId!, userId, mode);
 
@@ -58,11 +58,11 @@ export class HoldPlacesController extends BaseController {
 			playId: playInfo.currentPlayId,
 			mode,
 			userId,
-			gameCode: playInfo.currentPlayGameCode ?? config.defaultGameCode,
-			gameTitle: playInfo.currentPlayTitle ?? config.defaultGameTitle,
-			gameDescription: playInfo.currentPlayDescription ?? config.defaultGameDescription,
-			contentUrl: playInfo.currentPlayContentUrl ?? config.defaultContentUrl,
-			inputAdapter: playInfo.currentPlayInputAdapter ?? config.defaultInputAdapter,
+			gameCode: playInfo.gameCode ?? config.defaultGameCode,
+			gameTitle: playInfo.gameTitle ?? config.defaultGameTitle,
+			gameDescription: playInfo.gameDescription ?? config.defaultGameDescription,
+			contentUrl: playInfo.contentUrl ?? config.defaultContentUrl,
+			inputAdapter: playInfo.inputAdapter ?? config.defaultInputAdapter,
 			expireAt: playInfo.expireAt?.toDate().toISOString(),
 			playToken: token.value,
 			playlogServerUrl: token.url,
@@ -79,7 +79,7 @@ export class HoldPlacesController extends BaseController {
 			requireOwner: true,
 		});
 		if (playInfo.currentPlayId) {
-			await new AkashicSystemClient().stopPlay(playInfo.currentPlayId);
+			await this.stopAkashicPlayIfConfigured(playInfo.currentPlayId);
 		}
 		return {
 			result: "ok",
@@ -87,5 +87,14 @@ export class HoldPlacesController extends BaseController {
 			placeId: playInfo.placeId,
 			playId: playInfo.currentPlayId,
 		};
+	}
+
+	private async stopAkashicPlayIfConfigured(playId: string) {
+		if (!process.env.AKASHIC_SYSTEM_API_KEY) return;
+		try {
+			await new AkashicSystemClient().stopPlay(playId);
+		} catch (error) {
+			console.warn(error);
+		}
 	}
 }

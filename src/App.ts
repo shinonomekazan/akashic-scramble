@@ -517,11 +517,7 @@ export class App {
 							<div class="fw-semibold">${utils.escapeHtml(launch.gameTitle || launch.gameCode)}</div>
 							<div class="small text-secondary">${utils.escapeHtml(launch.gameDescription || "")}</div>
 						</div>
-						${
-							expireText
-								? `<div class="small text-muted">このPlayは ${utils.escapeHtml(expireText)} まで遊べます。</div>`
-								: ""
-						}
+						${expireText ? `<div class="small text-muted">このPlayは ${utils.escapeHtml(expireText)} まで遊べます。</div>` : ""}
 					</div>
 				</div>
 			`;
@@ -904,12 +900,16 @@ export class App {
 			const holdButtonLabel = isHoldSubmitting ? "確保中" : "確保する";
 			const releaseButtonLabel = isReleaseSubmitting ? "解放中" : "解放する";
 			const playStarting =
-				!!holdPlace && this.placeState.playStarting && this.placeState.playStartingHoldPlaceId === holdPlace.id;
+				!!holdPlace &&
+				this.placeState.playStarting &&
+				this.placeState.playStartingHoldPlaceId === holdPlace.id;
 			const playEnding =
 				!!holdPlace && this.placeState.playEnding && this.placeState.playEndingHoldPlaceId === holdPlace.id;
-			const joinUrl = holdPlace ? new URL(`/play/${encodeURIComponent(holdPlace.id)}`, location.origin).toString() : "";
-			const currentGameTitle = holdPlace?.currentPlayTitle || holdPlace?.currentPlayGameCode || fixedGameTitle;
-			const currentGameDescription = holdPlace?.currentPlayDescription || fixedGameDescription;
+			const joinUrl = holdPlace
+				? new URL(`/play/${encodeURIComponent(holdPlace.id)}`, location.origin).toString()
+				: "";
+			const currentGameTitle = fixedGameTitle;
+			const currentGameDescription = fixedGameDescription;
 			const currentGameDescriptionMarkup = currentGameDescription
 				? `<div class="small text-secondary mb-2">${utils.escapeHtml(currentGameDescription)}</div>`
 				: "";
@@ -1672,8 +1672,13 @@ export class App {
 			copyPlayButton.addEventListener("click", async () => {
 				const url = copyPlayButton.dataset.url;
 				if (!url) return;
-				await navigator.clipboard.writeText(url);
-				this.showToast("URLをコピーしました。", "success");
+				try {
+					await navigator.clipboard.writeText(url);
+					this.showToast("URLをコピーしました。", "success");
+				} catch (err) {
+					console.error(err);
+					this.showToast("URLのコピーに失敗しました。", "error");
+				}
 			});
 		}
 
@@ -1708,8 +1713,13 @@ export class App {
 			copyUrlButton.addEventListener("click", async () => {
 				const url = copyUrlButton.dataset.url;
 				if (!url) return;
-				await navigator.clipboard.writeText(url);
-				this.showToast("URLをコピーしました。", "success");
+				try {
+					await navigator.clipboard.writeText(url);
+					this.showToast("URLをコピーしました。", "success");
+				} catch (err) {
+					console.error(err);
+					this.showToast("URLのコピーに失敗しました。", "error");
+				}
 			});
 		}
 

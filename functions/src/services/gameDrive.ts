@@ -1,6 +1,3 @@
-import * as http from "http";
-import * as https from "https";
-
 interface ApiResponse<T> {
 	meta: {
 		status: number;
@@ -69,42 +66,25 @@ export function loadGameDriveConfig(): GameDriveConfig {
 	};
 }
 
-function requestJson<T>(url: string, options: https.RequestOptions): Promise<T> {
-	return new Promise((resolve, reject) => {
-		const parsedUrl = new URL(url);
-		const transport = parsedUrl.protocol === "http:" ? http : https;
-		const request = transport.request(
-			parsedUrl,
-			{
-				...options,
-				headers: {
-					Accept: "application/json",
-					...(options.headers ?? {}),
-				},
-			},
-			(response) => {
-				const chunks: Buffer[] = [];
-				response.on("data", (chunk: Buffer) => chunks.push(chunk));
-				response.on("end", () => {
-					const text = Buffer.concat(chunks).toString("utf8");
-					let json: T;
-					try {
-						json = text ? (JSON.parse(text) as T) : ({} as T);
-					} catch (error) {
-						reject(new Error(`Game Drive API returned invalid JSON: ${text.slice(0, 120)}`));
-						return;
-					}
-					if (response.statusCode == null || response.statusCode < 200 || response.statusCode >= 300) {
-						reject(new Error(`Game Drive API error: HTTP ${response.statusCode} ${text.slice(0, 120)}`));
-						return;
-					}
-					resolve(json);
-				});
-			},
-		);
-		request.on("error", reject);
-		request.end();
+async function requestJson<T>(url: string, options: { method: string; headers?: Record<string, string> }): Promise<T> {
+	const response = await fetch(url, {
+		method: options.method,
+		headers: {
+			Accept: "application/json",
+			...(options.headers ?? {}),
+		},
 	});
+	const text = await response.text();
+	let json: T;
+	try {
+		json = text ? (JSON.parse(text) as T) : ({} as T);
+	} catch (error) {
+		throw new Error(`Game Drive API returned invalid JSON: ${text.slice(0, 120)}`);
+	}
+	if (!response.ok) {
+		throw new Error(`Game Drive API error: HTTP ${response.status} ${text.slice(0, 120)}`);
+	}
+	return json;
 }
 
 export class GameDriveClient {
