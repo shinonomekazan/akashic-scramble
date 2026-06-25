@@ -24,7 +24,6 @@ export interface GameDriveConfig {
 	apiBaseUrl: string;
 	apiKey?: string;
 	contentCdnBaseUrl: string;
-	contentId?: string;
 }
 
 export interface ResolvedGameDriveContent {
@@ -62,7 +61,6 @@ export function loadGameDriveConfig(): GameDriveConfig {
 		contentCdnBaseUrl: normalizeBaseUrl(
 			process.env.GAME_DRIVE_CONTENT_CDN_BASE_URL ?? "https://drive.akashic.shinonomekazan.com",
 		),
-		contentId: optionalEnv("SCRAMBLE_GAME_DRIVE_CONTENT_ID"),
 	};
 }
 

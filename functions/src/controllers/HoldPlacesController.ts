@@ -6,6 +6,7 @@ import * as params from "../params";
 import { Router } from "express";
 import { clearHoldPlacePlay, getHoldPlacePlayInfo } from "../stores";
 import { AkashicExecutionMode, AkashicSystemClient, loadAkashicSystemConfig } from "../services/akashicSystem";
+import { buildAkashicGameCode, resolvePlayContentInfo } from "../services/playContent";
 
 interface IdParams {
 	authorization: string;
@@ -51,6 +52,7 @@ export class HoldPlacesController extends BaseController {
 		const mode: AkashicExecutionMode = playInfo.ownerUserId === verifyResult.uid ? "active" : "passive";
 		const userId = `scramble-${verifyResult.uid}`;
 		const token = await new AkashicSystemClient(config).createToken(playInfo.currentPlayId!, userId, mode);
+		const content = await resolvePlayContentInfo(playInfo);
 
 		return {
 			holdPlaceId: playInfo.holdPlaceId,
@@ -58,11 +60,11 @@ export class HoldPlacesController extends BaseController {
 			playId: playInfo.currentPlayId,
 			mode,
 			userId,
-			gameCode: playInfo.gameCode ?? config.defaultGameCode,
-			gameTitle: playInfo.gameTitle ?? config.defaultGameTitle,
-			gameDescription: playInfo.gameDescription ?? config.defaultGameDescription,
-			contentUrl: playInfo.contentUrl ?? config.defaultContentUrl,
-			inputAdapter: playInfo.inputAdapter ?? config.defaultInputAdapter,
+			gameCode: buildAkashicGameCode(playInfo.holdPlaceId, content.contentCode),
+			gameTitle: content.title,
+			gameDescription: content.description,
+			contentUrl: content.contentUrl,
+			inputAdapter: content.inputAdapter,
 			expireAt: playInfo.expireAt?.toDate().toISOString(),
 			playToken: token.value,
 			playlogServerUrl: token.url,

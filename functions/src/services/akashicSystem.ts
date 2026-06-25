@@ -15,11 +15,6 @@ export interface AkashicSystemConfig {
 	apiBaseUrl: string;
 	apiKey: string;
 	gamePageUrl: string;
-	defaultGameCode: string;
-	defaultGameTitle: string;
-	defaultGameDescription: string;
-	defaultContentUrl: string;
-	defaultInputAdapter: string;
 }
 
 export interface AkashicPermission {
@@ -67,14 +62,13 @@ export function loadAkashicSystemConfig(): AkashicSystemConfig {
 	}
 
 	return {
-		apiBaseUrl: normalizeBaseUrl(process.env.AKASHIC_SYSTEM_API_BASE_URL ?? "https://akashic-system.shinonomekazan.com/api"),
+		apiBaseUrl: normalizeBaseUrl(
+			process.env.AKASHIC_SYSTEM_API_BASE_URL ?? "https://akashic-system.shinonomekazan.com/api",
+		),
 		apiKey,
-		gamePageUrl: process.env.AKASHIC_SYSTEM_GAME_PAGE_URL ?? "https://akashic-system.shinonomekazan.com/contents/index.html",
-		defaultGameCode: process.env.SCRAMBLE_AKASHIC_GAME_CODE ?? "rocket-game",
-		defaultGameTitle: process.env.SCRAMBLE_AKASHIC_GAME_TITLE ?? "Rocket Game",
-		defaultGameDescription: process.env.SCRAMBLE_AKASHIC_GAME_DESCRIPTION ?? "",
-		defaultContentUrl: process.env.SCRAMBLE_AKASHIC_CONTENT_URL ?? "/contents/rocket-game/content.json",
-		defaultInputAdapter: process.env.SCRAMBLE_AKASHIC_INPUT_ADAPTER ?? "rocket-game",
+		gamePageUrl:
+			process.env.AKASHIC_SYSTEM_GAME_PAGE_URL ??
+			"https://akashic-system.shinonomekazan.com/contents/index.html",
 	};
 }
 

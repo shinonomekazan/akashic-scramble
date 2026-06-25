@@ -23,11 +23,9 @@ export interface HoldPlacePlayInfo {
 	placeId: string;
 	holdUserId?: string;
 	currentPlayId?: string;
-	gameCode?: string;
-	gameTitle?: string;
-	gameDescription?: string;
+	providerId?: string;
+	contentCode?: string;
 	contentUrl?: string;
-	inputAdapter?: string;
 	ownerUserId?: string;
 	expireAt?: Timestamp;
 }
@@ -148,12 +146,10 @@ function normalizeHoldPlacePlayInfo(
 		placeId: readHoldPlacePlaceId(holdPlaceId, holdPlaceData),
 		holdUserId: typeof holdPlaceData.holdUserId === "string" ? holdPlaceData.holdUserId : undefined,
 		currentPlayId: typeof holdPlaceData.currentPlayId === "string" ? holdPlaceData.currentPlayId : undefined,
-		gameCode: typeof playData?.gameCode === "string" ? playData.gameCode : undefined,
-		gameTitle: typeof playData?.title === "string" ? playData.title : undefined,
-		gameDescription: typeof playData?.description === "string" ? playData.description : undefined,
-		contentUrl: typeof playData?.contentUrl === "string" ? playData.contentUrl : undefined,
-		inputAdapter: typeof playData?.inputAdapter === "string" ? playData.inputAdapter : undefined,
-		ownerUserId: typeof playData?.ownerUserId === "string" ? playData.ownerUserId : undefined,
+		providerId: playData?.providerId,
+		contentCode: playData?.contentCode,
+		contentUrl: playData?.contentUrl,
+		ownerUserId: playData?.ownerUserId,
 		expireAt: holdPlaceData.expireAt,
 	};
 }
@@ -353,11 +349,7 @@ export function setHoldPlacePlay(
 		systemPlayId: string;
 		providerId: string;
 		contentCode: string;
-		gameCode: string;
-		gameTitle: string;
-		gameDescription: string;
 		contentUrl: string;
-		inputAdapter: string;
 		ownerUserId: string;
 	},
 ) {
@@ -375,7 +367,8 @@ export function setHoldPlacePlay(
 		if (holdPlaceData.holdUserId && holdPlaceData.holdUserId !== input.holdUserId) {
 			throw new fw.types.Forbidden("HoldPlace is owned by another user");
 		}
-		const currentPlayId = typeof holdPlaceData.currentPlayId === "string" ? holdPlaceData.currentPlayId : undefined;
+		const currentPlayId =
+			typeof holdPlaceData.currentPlayId === "string" ? holdPlaceData.currentPlayId : undefined;
 		if (currentPlayId) {
 			const playSnap = await transaction.get(firestore.collection("plays").doc(currentPlayId));
 			if (!playSnap.exists) {
@@ -392,10 +385,6 @@ export function setHoldPlacePlay(
 			providerId: input.providerId,
 			contentCode: input.contentCode,
 			contentUrl: input.contentUrl,
-			gameCode: input.gameCode,
-			title: input.gameTitle,
-			description: input.gameDescription,
-			inputAdapter: input.inputAdapter,
 			state: "playing",
 			ownerUserId: input.ownerUserId,
 			joinedPlayerIds: [],
@@ -411,10 +400,14 @@ export function setHoldPlacePlay(
 		await transaction.set(firestore.collection("plays").doc(input.systemPlayId), eraseUndefined(play));
 		await transaction.update(holdPlaceRef, nextHoldPlaceData);
 
-		return normalizeHoldPlacePlayInfo(holdPlaceRef.id, {
-			...holdPlaceData,
-			...nextHoldPlaceData,
-		}, play);
+		return normalizeHoldPlacePlayInfo(
+			holdPlaceRef.id,
+			{
+				...holdPlaceData,
+				...nextHoldPlaceData,
+			},
+			play,
+		);
 	});
 }
 
@@ -464,7 +457,8 @@ export function clearHoldPlacePlay(
 			throw new fw.types.Forbidden("HoldPlace is owned by another user");
 		}
 
-		const currentPlayId = typeof holdPlaceData.currentPlayId === "string" ? holdPlaceData.currentPlayId : undefined;
+		const currentPlayId =
+			typeof holdPlaceData.currentPlayId === "string" ? holdPlaceData.currentPlayId : undefined;
 		const playRef = currentPlayId ? firestore.collection("plays").doc(currentPlayId) : undefined;
 		const playSnap = playRef ? await transaction.get(playRef) : undefined;
 		const playInfo = normalizeHoldPlacePlayInfo(

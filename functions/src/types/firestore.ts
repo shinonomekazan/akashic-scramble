@@ -139,14 +139,6 @@ export interface Play {
 	 */
 	contentUrl: string;
 
-	gameCode?: string;
-
-	title?: string;
-
-	description?: string;
-
-	inputAdapter?: string;
-
 	/**
 	 * プレイの状態。
 	 */

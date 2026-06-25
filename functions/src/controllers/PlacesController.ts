@@ -6,7 +6,7 @@ import * as params from "../params";
 import { Router } from "express";
 import { getCurrentHoldPlacePlayInfo, holdPlace, releaseHoldPlace, setHoldPlacePlay } from "../stores";
 import { AkashicSystemClient, loadAkashicSystemConfig } from "../services/akashicSystem";
-import { GameDriveClient, loadGameDriveConfig } from "../services/gameDrive";
+import { buildAkashicGameCode, DEFAULT_SCRAMBLE_PLAY_CONTENT, resolvePlayContentInfo } from "../services/playContent";
 
 interface IdParams {
 	authorization: string;
@@ -85,23 +85,24 @@ export class PlacesController extends BaseController {
 			requireOwner: true,
 		});
 		if (target.currentPlayId) {
+			const content = await resolvePlayContentInfo(target);
 			return {
 				holdPlaceId: target.holdPlaceId,
 				placeId: target.placeId,
 				playId: target.currentPlayId,
-				gameCode: target.gameCode ?? config.defaultGameCode,
-				gameTitle: target.gameTitle ?? config.defaultGameTitle,
-				gameDescription: target.gameDescription ?? config.defaultGameDescription,
-				contentUrl: target.contentUrl ?? config.defaultContentUrl,
-				inputAdapter: target.inputAdapter ?? config.defaultInputAdapter,
+				gameCode: buildAkashicGameCode(target.holdPlaceId, content.contentCode),
+				gameTitle: content.title,
+				gameDescription: content.description,
+				contentUrl: content.contentUrl,
+				inputAdapter: content.inputAdapter,
 				expireAt: target.expireAt?.toDate().toISOString(),
 				joinPath: `/play/${encodeURIComponent(target.holdPlaceId)}`,
 			};
 		}
 
-		const game = await this.resolveGameConfig(config);
+		const content = DEFAULT_SCRAMBLE_PLAY_CONTENT;
 		const system = new AkashicSystemClient(config);
-		const gameCode = `scramble-${target.holdPlaceId}-${game.gameCode}`;
+		const gameCode = buildAkashicGameCode(target.holdPlaceId, content.contentCode);
 		const createdPlay = await system.createPlay(gameCode);
 		let storedPlay;
 		try {
@@ -109,13 +110,9 @@ export class PlacesController extends BaseController {
 				holdPlaceId: target.holdPlaceId,
 				holdUserId: verifyResult.uid,
 				systemPlayId: createdPlay.id,
-				providerId: game.providerId,
-				contentCode: game.contentCode,
-				gameCode,
-				gameTitle: game.title,
-				gameDescription: game.description,
-				contentUrl: game.contentUrl,
-				inputAdapter: config.defaultInputAdapter,
+				providerId: content.providerId,
+				contentCode: content.contentCode,
+				contentUrl: content.contentUrl,
 				ownerUserId: verifyResult.uid,
 			});
 
@@ -127,15 +124,16 @@ export class PlacesController extends BaseController {
 			throw error;
 		}
 
+		const storedContent = await resolvePlayContentInfo(storedPlay);
 		return {
 			holdPlaceId: storedPlay.holdPlaceId,
 			placeId: storedPlay.placeId,
 			playId: storedPlay.currentPlayId,
-			gameCode: storedPlay.gameCode ?? gameCode,
-			gameTitle: storedPlay.gameTitle ?? config.defaultGameTitle,
-			gameDescription: storedPlay.gameDescription ?? config.defaultGameDescription,
-			contentUrl: storedPlay.contentUrl ?? config.defaultContentUrl,
-			inputAdapter: storedPlay.inputAdapter ?? config.defaultInputAdapter,
+			gameCode: buildAkashicGameCode(storedPlay.holdPlaceId, storedContent.contentCode),
+			gameTitle: storedContent.title,
+			gameDescription: storedContent.description,
+			contentUrl: storedContent.contentUrl,
+			inputAdapter: storedContent.inputAdapter,
 			expireAt: storedPlay.expireAt?.toDate().toISOString(),
 			joinPath: `/play/${encodeURIComponent(storedPlay.holdPlaceId)}`,
 		};
@@ -148,29 +146,5 @@ export class PlacesController extends BaseController {
 		} catch (error) {
 			console.warn(error);
 		}
-	}
-
-	private async resolveGameConfig(config: ReturnType<typeof loadAkashicSystemConfig>) {
-		const gameDriveConfig = loadGameDriveConfig();
-		if (!gameDriveConfig.contentId) {
-			return {
-				providerId: "akashic-system",
-				contentCode: config.defaultGameCode,
-				gameCode: config.defaultGameCode,
-				title: config.defaultGameTitle,
-				description: config.defaultGameDescription,
-				contentUrl: config.defaultContentUrl,
-			};
-		}
-
-		const content = await new GameDriveClient(gameDriveConfig).resolveContent(gameDriveConfig.contentId);
-		return {
-			providerId: "akashic-game-drive",
-			contentCode: content.contentId,
-			gameCode: `game-drive-${content.contentId}`,
-			title: content.title,
-			description: content.description,
-			contentUrl: content.contentUrl,
-		};
 	}
 }
