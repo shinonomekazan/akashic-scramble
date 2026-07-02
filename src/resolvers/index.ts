@@ -13,7 +13,7 @@ function normalizePlace(id: string, data: Partial<Place> | undefined): Place {
 		y: typeof data?.y === "number" ? data.y : 0,
 		name: data?.name ?? id,
 		behaviours: Array.isArray(data?.behaviours) ? (data.behaviours as PlaceBehaviour[]) : [],
-		currentHoldPlaceId: typeof data?.currentHoldPlaceId === "string" ? data.currentHoldPlaceId : undefined,
+		currentHoldPlaceId: data?.currentHoldPlaceId,
 	};
 }
 
@@ -22,8 +22,8 @@ function normalizeHoldPlace(id: string, data: Partial<HoldPlace> | undefined): H
 		id,
 		placeId: data?.placeId ?? "",
 		behaviours: Array.isArray(data?.behaviours) ? (data.behaviours as PlaceBehaviour[]) : [],
-		holdUserId: typeof data?.holdUserId === "string" ? data.holdUserId : undefined,
-		currentPlayId: typeof data?.currentPlayId === "string" ? data.currentPlayId : undefined,
+		holdUserId: data?.holdUserId,
+		currentPlayId: data?.currentPlayId,
 		expireAt: data?.expireAt,
 		endedAt: data?.endedAt,
 	};
