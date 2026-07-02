@@ -6,7 +6,6 @@ export interface PlayContentInfo {
 	title: string;
 	description: string;
 	contentUrl: string;
-	inputAdapter: string;
 }
 
 export interface PlayContentRef {
@@ -22,7 +21,6 @@ export const DEFAULT_SCRAMBLE_PLAY_CONTENT: PlayContentInfo = {
 	title: "Rocket Game",
 	description: "",
 	contentUrl: "/contents/rocket-game/content.json",
-	inputAdapter: "rocket-game",
 };
 
 export function buildAkashicGameCode(holdPlaceId: string, contentCode: string) {
@@ -38,7 +36,6 @@ export async function resolvePlayContentInfo(contentRef: PlayContentRef = {}): P
 			title: content.title,
 			description: content.description,
 			contentUrl: contentRef.contentUrl ?? content.contentUrl,
-			inputAdapter: DEFAULT_SCRAMBLE_PLAY_CONTENT.inputAdapter,
 		};
 	}
 

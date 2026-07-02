@@ -51,6 +51,20 @@ function resolveHoldExpireAt(behaviours: PlaceBehaviour[], now: Timestamp) {
 	return Timestamp.fromMillis(now.toMillis() + time);
 }
 
+function readOptionalString(docName: string, fieldName: string, value: unknown) {
+	if (value === undefined) return undefined;
+	if (typeof value === "string") return value;
+	throw new fw.types.InternalServerError(`${docName}.${fieldName} must be a string`);
+}
+
+function readHoldPlaceHoldUserId(holdPlaceId: string, holdPlaceData: Partial<HoldPlace>) {
+	return readOptionalString(`HoldPlace ${holdPlaceId}`, "holdUserId", holdPlaceData.holdUserId);
+}
+
+function readHoldPlaceCurrentPlayId(holdPlaceId: string, holdPlaceData: Partial<HoldPlace>) {
+	return readOptionalString(`HoldPlace ${holdPlaceId}`, "currentPlayId", holdPlaceData.currentPlayId);
+}
+
 async function endHoldPlaceTransaction(
 	firestore: Firestore,
 	transaction: Transaction,
@@ -78,7 +92,8 @@ async function endHoldPlaceTransaction(
 		throw new fw.types.Duplicate("HoldPlace is already ended");
 	}
 
-	if (input.requireOwner && holdPlaceData.holdUserId && holdPlaceData.holdUserId !== input.holdUserId) {
+	const holdUserId = readHoldPlaceHoldUserId(holdPlaceRef.id, holdPlaceData);
+	if (input.requireOwner && holdUserId && holdUserId !== input.holdUserId) {
 		throw new fw.types.Forbidden("HoldPlace is owned by another user");
 	}
 
@@ -89,7 +104,7 @@ async function endHoldPlaceTransaction(
 
 	const now = input.now ?? Timestamp.now();
 	const placeId = input.placeId ?? holdPlaceData.placeId;
-	const currentPlayId = typeof holdPlaceData.currentPlayId === "string" ? holdPlaceData.currentPlayId : undefined;
+	const currentPlayId = readHoldPlaceCurrentPlayId(holdPlaceRef.id, holdPlaceData);
 	const playRef = currentPlayId ? firestore.collection("plays").doc(currentPlayId) : undefined;
 	const playSnap = playRef ? await transaction.get(playRef) : undefined;
 	if (placeId != undefined) {
@@ -144,8 +159,8 @@ function normalizeHoldPlacePlayInfo(
 	return {
 		holdPlaceId,
 		placeId: readHoldPlacePlaceId(holdPlaceId, holdPlaceData),
-		holdUserId: typeof holdPlaceData.holdUserId === "string" ? holdPlaceData.holdUserId : undefined,
-		currentPlayId: typeof holdPlaceData.currentPlayId === "string" ? holdPlaceData.currentPlayId : undefined,
+		holdUserId: readHoldPlaceHoldUserId(holdPlaceId, holdPlaceData),
+		currentPlayId: readHoldPlaceCurrentPlayId(holdPlaceId, holdPlaceData),
 		providerId: playData?.providerId,
 		contentCode: playData?.contentCode,
 		contentUrl: playData?.contentUrl,
@@ -326,11 +341,12 @@ export async function getCurrentHoldPlacePlayInfo(
 	if (holdPlaceData.endedAt != null) {
 		throw new fw.types.BadRequest("HoldPlace is already ended");
 	}
-	if (input.requireOwner && holdPlaceData.holdUserId && holdPlaceData.holdUserId !== input.holdUserId) {
+	const holdUserId = readHoldPlaceHoldUserId(holdPlaceSnap.id, holdPlaceData);
+	if (input.requireOwner && holdUserId && holdUserId !== input.holdUserId) {
 		throw new fw.types.Forbidden("HoldPlace is owned by another user");
 	}
 
-	const currentPlayId = typeof holdPlaceData.currentPlayId === "string" ? holdPlaceData.currentPlayId : undefined;
+	const currentPlayId = readHoldPlaceCurrentPlayId(holdPlaceSnap.id, holdPlaceData);
 	if (!currentPlayId) {
 		return normalizeHoldPlacePlayInfo(holdPlaceSnap.id, holdPlaceData);
 	}
@@ -364,11 +380,11 @@ export function setHoldPlacePlay(
 		if (holdPlaceData.endedAt != null) {
 			throw new fw.types.BadRequest("HoldPlace is already ended");
 		}
-		if (holdPlaceData.holdUserId && holdPlaceData.holdUserId !== input.holdUserId) {
+		const holdUserId = readHoldPlaceHoldUserId(holdPlaceRef.id, holdPlaceData);
+		if (holdUserId && holdUserId !== input.holdUserId) {
 			throw new fw.types.Forbidden("HoldPlace is owned by another user");
 		}
-		const currentPlayId =
-			typeof holdPlaceData.currentPlayId === "string" ? holdPlaceData.currentPlayId : undefined;
+		const currentPlayId = readHoldPlaceCurrentPlayId(holdPlaceRef.id, holdPlaceData);
 		if (currentPlayId) {
 			const playSnap = await transaction.get(firestore.collection("plays").doc(currentPlayId));
 			if (!playSnap.exists) {
@@ -453,12 +469,12 @@ export function clearHoldPlacePlay(
 		}
 
 		const holdPlaceData = holdPlaceSnap.data() as Partial<HoldPlace>;
-		if (input.requireOwner && holdPlaceData.holdUserId && holdPlaceData.holdUserId !== input.holdUserId) {
+		const holdUserId = readHoldPlaceHoldUserId(holdPlaceRef.id, holdPlaceData);
+		if (input.requireOwner && holdUserId && holdUserId !== input.holdUserId) {
 			throw new fw.types.Forbidden("HoldPlace is owned by another user");
 		}
 
-		const currentPlayId =
-			typeof holdPlaceData.currentPlayId === "string" ? holdPlaceData.currentPlayId : undefined;
+		const currentPlayId = readHoldPlaceCurrentPlayId(holdPlaceRef.id, holdPlaceData);
 		const playRef = currentPlayId ? firestore.collection("plays").doc(currentPlayId) : undefined;
 		const playSnap = playRef ? await transaction.get(playRef) : undefined;
 		const playInfo = normalizeHoldPlacePlayInfo(

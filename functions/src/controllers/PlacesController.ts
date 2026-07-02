@@ -90,11 +90,9 @@ export class PlacesController extends BaseController {
 				holdPlaceId: target.holdPlaceId,
 				placeId: target.placeId,
 				playId: target.currentPlayId,
-				gameCode: buildAkashicGameCode(target.holdPlaceId, content.contentCode),
 				gameTitle: content.title,
 				gameDescription: content.description,
 				contentUrl: content.contentUrl,
-				inputAdapter: content.inputAdapter,
 				expireAt: target.expireAt?.toDate().toISOString(),
 				joinPath: `/play/${encodeURIComponent(target.holdPlaceId)}`,
 			};
@@ -129,11 +127,9 @@ export class PlacesController extends BaseController {
 			holdPlaceId: storedPlay.holdPlaceId,
 			placeId: storedPlay.placeId,
 			playId: storedPlay.currentPlayId,
-			gameCode: buildAkashicGameCode(storedPlay.holdPlaceId, storedContent.contentCode),
 			gameTitle: storedContent.title,
 			gameDescription: storedContent.description,
 			contentUrl: storedContent.contentUrl,
-			inputAdapter: storedContent.inputAdapter,
 			expireAt: storedPlay.expireAt?.toDate().toISOString(),
 			joinPath: `/play/${encodeURIComponent(storedPlay.holdPlaceId)}`,
 		};

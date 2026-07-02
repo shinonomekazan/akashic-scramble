@@ -6,7 +6,7 @@ import * as params from "../params";
 import { Router } from "express";
 import { clearHoldPlacePlay, getHoldPlacePlayInfo } from "../stores";
 import { AkashicExecutionMode, AkashicSystemClient, loadAkashicSystemConfig } from "../services/akashicSystem";
-import { buildAkashicGameCode, resolvePlayContentInfo } from "../services/playContent";
+import { resolvePlayContentInfo } from "../services/playContent";
 
 interface IdParams {
 	authorization: string;
@@ -60,11 +60,9 @@ export class HoldPlacesController extends BaseController {
 			playId: playInfo.currentPlayId,
 			mode,
 			userId,
-			gameCode: buildAkashicGameCode(playInfo.holdPlaceId, content.contentCode),
 			gameTitle: content.title,
 			gameDescription: content.description,
 			contentUrl: content.contentUrl,
-			inputAdapter: content.inputAdapter,
 			expireAt: playInfo.expireAt?.toDate().toISOString(),
 			playToken: token.value,
 			playlogServerUrl: token.url,

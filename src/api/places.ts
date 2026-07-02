@@ -15,11 +15,9 @@ export interface StartPlacePlayResult {
 	holdPlaceId: string;
 	placeId: string;
 	playId: string;
-	gameCode: string;
 	gameTitle: string;
 	gameDescription: string;
 	contentUrl: string;
-	inputAdapter: string;
 	expireAt?: string;
 	joinPath: string;
 }
@@ -30,11 +28,9 @@ export interface LaunchHoldPlacePlayResult {
 	playId: string;
 	mode: "active" | "passive";
 	userId: string;
-	gameCode: string;
 	gameTitle: string;
 	gameDescription: string;
 	contentUrl: string;
-	inputAdapter: string;
 	expireAt?: string;
 	playToken: string;
 	playlogServerUrl: string;

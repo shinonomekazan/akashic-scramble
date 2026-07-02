@@ -481,7 +481,7 @@ export class App {
 				<div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
 					<div>
 						<div class="small text-muted">${utils.escapeHtml(modeLabel)}</div>
-						<div class="fw-semibold">${utils.escapeHtml(launch.gameTitle || launch.gameCode)}</div>
+						<div class="fw-semibold">${utils.escapeHtml(launch.gameTitle || "Akashic Game")}</div>
 						<div class="small text-muted">Play ID: ${utils.escapeHtml(launch.playId)}</div>
 					</div>
 					${
@@ -514,7 +514,7 @@ export class App {
 						</div>
 						<div class="mb-3">
 							<div class="small text-muted mb-1">コンテンツ</div>
-							<div class="fw-semibold">${utils.escapeHtml(launch.gameTitle || launch.gameCode)}</div>
+							<div class="fw-semibold">${utils.escapeHtml(launch.gameTitle || "Akashic Game")}</div>
 							<div class="small text-secondary">${utils.escapeHtml(launch.gameDescription || "")}</div>
 						</div>
 						${expireText ? `<div class="small text-muted">このPlayは ${utils.escapeHtml(expireText)} まで遊べます。</div>` : ""}
@@ -618,9 +618,7 @@ export class App {
 					mode: launch.mode,
 					playId: launch.playId,
 					userId: launch.userId,
-					gameCode: launch.gameCode,
 					contentUrl: launch.contentUrl,
-					inputAdapter: launch.inputAdapter,
 					playToken: launch.playToken,
 					playlogServerUrl: launch.playlogServerUrl,
 				},
