@@ -19,10 +19,4 @@ export class App extends fw.App<AppConfig> {
 		this.auth = getAuth(firebaseApp);
 	}
 
-	enableCredentials() {
-		this.app.use((req, res, next) => {
-			res.header("Access-Control-Allow-Credentials", "true");
-			next();
-		});
-	}
 }

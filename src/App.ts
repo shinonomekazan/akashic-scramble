@@ -2,7 +2,14 @@ import { connectAuthEmulator, type User as FirebaseUser } from "firebase/auth";
 import { connectFirestoreEmulator } from "firebase/firestore";
 import { signInWithGoogle, signOutCurrentUser, watchAuthChanges } from "./auth";
 import { Client as ApiClient } from "./api/client";
-import { holdPlace, releasePlace } from "./api/places";
+import {
+	endHoldPlacePlay,
+	holdPlace,
+	launchHoldPlacePlay,
+	type LaunchHoldPlacePlayResult,
+	releasePlace,
+	startPlacePlay,
+} from "./api/places";
 import { createUser, updateUser } from "./api/users";
 import { appConfig } from "./config";
 import type { AppConfig } from "./config.types";
@@ -24,6 +31,9 @@ type AuthState = {
 };
 
 type PlaceStatus = "playing" | "idle";
+
+const fixedGameTitle = "Rocket Game";
+const fixedGameDescription = "";
 
 type TopState = {
 	places: Place[];
@@ -56,6 +66,19 @@ type PlaceState = {
 	holdSubmittingPlaceId: string | null;
 	releaseSubmitting: boolean;
 	releaseSubmittingPlaceId: string | null;
+	playStarting: boolean;
+	playStartingHoldPlaceId: string | null;
+	playEnding: boolean;
+	playEndingHoldPlaceId: string | null;
+};
+
+type PlayLaunchState = {
+	holdPlaceId: string | null;
+	loading: boolean;
+	loaded: boolean;
+	error: string | null;
+	launch: LaunchHoldPlacePlayResult | null;
+	ending: boolean;
 };
 
 export class App {
@@ -67,6 +90,7 @@ export class App {
 	state: AuthState;
 	topState: TopState;
 	placeState: PlaceState;
+	playLaunchState: PlayLaunchState;
 	placeWatchUnsub: (() => void) | null;
 	placeWatchId: string | null;
 	holdPlaceWatchUnsub: (() => void) | null;
@@ -124,6 +148,19 @@ export class App {
 			holdSubmittingPlaceId: null,
 			releaseSubmitting: false,
 			releaseSubmittingPlaceId: null,
+			playStarting: false,
+			playStartingHoldPlaceId: null,
+			playEnding: false,
+			playEndingHoldPlaceId: null,
+		};
+
+		this.playLaunchState = {
+			holdPlaceId: null,
+			loading: false,
+			loaded: false,
+			error: null,
+			launch: null,
+			ending: false,
 		};
 
 		this.placeWatchUnsub = null;
@@ -161,6 +198,16 @@ export class App {
 			if (utils.parseRoute().name !== "top") return;
 			const gridMetrics = this.getGridMetrics(this.topState.places);
 			this.applyTopGridLayout(gridMetrics);
+		});
+		window.addEventListener("message", (event) => {
+			if (event.data?.type !== "akashic-system-launch-ready") return;
+			const launch = this.playLaunchState.launch;
+			if (!launch) return;
+			const frame = this.rootEl.querySelector<HTMLIFrameElement>("#play-frame");
+			if (!frame?.contentWindow || event.source !== frame.contentWindow) return;
+			const expectedOrigin = new URL(launch.gamePageUrl).origin;
+			if (event.origin !== expectedOrigin) return;
+			this.postPlayLaunchConfig(expectedOrigin);
 		});
 	}
 
@@ -206,7 +253,11 @@ export class App {
 				this.placeState.holdSubmitting ||
 				this.placeState.holdSubmittingPlaceId ||
 				this.placeState.releaseSubmitting ||
-				this.placeState.releaseSubmittingPlaceId
+				this.placeState.releaseSubmittingPlaceId ||
+				this.placeState.playStarting ||
+				this.placeState.playStartingHoldPlaceId ||
+				this.placeState.playEnding ||
+				this.placeState.playEndingHoldPlaceId
 			) {
 				this.placeState = {
 					...this.placeState,
@@ -222,8 +273,22 @@ export class App {
 					holdSubmittingPlaceId: null,
 					releaseSubmitting: false,
 					releaseSubmittingPlaceId: null,
+					playStarting: false,
+					playStartingHoldPlaceId: null,
+					playEnding: false,
+					playEndingHoldPlaceId: null,
 				};
 			}
+		}
+		if (route.name !== "play" && this.playLaunchState.holdPlaceId) {
+			this.playLaunchState = {
+				holdPlaceId: null,
+				loading: false,
+				loaded: false,
+				error: null,
+				launch: null,
+				ending: false,
+			};
 		}
 		switch (route.name) {
 			case "login":
@@ -240,6 +305,9 @@ export class App {
 				break;
 			case "place":
 				this.renderPlace(route.placeId);
+				break;
+			case "play":
+				this.renderPlay(route.holdPlaceId);
 				break;
 			default:
 				this.renderTop();
@@ -371,6 +439,198 @@ export class App {
 
 		this.bindMenuEvents(user);
 		this.bindPlaceEvents();
+	}
+
+	renderPlay(holdPlaceId: string) {
+		const user = this.state.user;
+		if (!user) {
+			utils.navigateTo("/login");
+			return;
+		}
+		if (user && !this.state.profileLoaded && !this.state.profileLoading) {
+			void this.loadUserProfile();
+		}
+		if (!this.state.profileLoaded || this.state.profileLoading) {
+			this.rootEl.innerHTML = '<div class="loading">Loading profile...</div>';
+			return;
+		}
+
+		if (this.playLaunchState.holdPlaceId !== holdPlaceId) {
+			this.playLaunchState = {
+				holdPlaceId,
+				loading: false,
+				loaded: false,
+				error: null,
+				launch: null,
+				ending: false,
+			};
+		}
+		if (!this.playLaunchState.loaded && !this.playLaunchState.loading) {
+			void this.loadPlayLaunch(holdPlaceId);
+		}
+
+		const menuMarkup = this.renderMenuMarkup(user, this.state.profile);
+		const { loading, error, launch, ending } = this.playLaunchState;
+		let bodyMarkup = "";
+		if (loading) {
+			bodyMarkup = '<div class="text-muted">ゲーム起動情報を取得中...</div>';
+		} else if (error) {
+			bodyMarkup = `<div class="text-danger small">${utils.escapeHtml(error)}</div>`;
+		} else if (!launch) {
+			bodyMarkup = '<div class="text-muted">起動できるPlayがありません。</div>';
+		} else {
+			const frameUrl = this.buildAkashicFrameUrl(launch);
+			const shareUrl = new URL(`/play/${encodeURIComponent(holdPlaceId)}`, location.origin).toString();
+			const expireText = this.formatDateTime(launch.expireAt);
+			const modeLabel = launch.mode === "active" ? "操作担当" : "参加中";
+			bodyMarkup = `
+				<div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+					<div>
+						<div class="small text-muted">${utils.escapeHtml(modeLabel)}</div>
+						<div class="fw-semibold">${utils.escapeHtml(launch.gameTitle || "Akashic Game")}</div>
+						<div class="small text-muted">Play ID: ${utils.escapeHtml(launch.playId)}</div>
+					</div>
+					${
+						launch.mode === "active"
+							? `<button id="play-end-button" class="btn btn-outline-secondary btn-sm" data-hold-place-id="${utils.escapeHtml(
+									holdPlaceId,
+								)}" ${ending ? "disabled" : ""} type="button">${ending ? "終了中..." : "Play終了"}</button>`
+							: ""
+					}
+				</div>
+				<div class="row g-3 align-items-start">
+					<div class="col-12 col-lg-8">
+						<div class="ratio ratio-1x1 border rounded-3 overflow-hidden bg-dark">
+							<iframe
+								id="play-frame"
+								title="Akashic Game"
+								src="${utils.escapeHtml(frameUrl)}"
+								allow="fullscreen"
+								style="border:0;"
+							></iframe>
+						</div>
+					</div>
+					<div class="col-12 col-lg-4">
+						<div class="mb-3">
+							<div class="small text-muted mb-1">参加URL</div>
+							<div class="small text-break border rounded p-2 bg-light mb-2">${utils.escapeHtml(shareUrl)}</div>
+							<button id="play-copy-url-button" class="btn btn-outline-secondary btn-sm" data-url="${utils.escapeHtml(
+								shareUrl,
+							)}" type="button">URLをコピー</button>
+						</div>
+						<div class="mb-3">
+							<div class="small text-muted mb-1">コンテンツ</div>
+							<div class="fw-semibold">${utils.escapeHtml(launch.gameTitle || "Akashic Game")}</div>
+							<div class="small text-secondary">${utils.escapeHtml(launch.gameDescription || "")}</div>
+						</div>
+						${expireText ? `<div class="small text-muted">このPlayは ${utils.escapeHtml(expireText)} まで遊べます。</div>` : ""}
+					</div>
+				</div>
+			`;
+		}
+
+		this.rootEl.innerHTML = `
+			<div class="play-page container py-5">
+				<div class="mb-3">
+					<button id="play-back" class="btn btn-outline-secondary btn-sm" ${
+						launch?.placeId ? `data-place-id="${utils.escapeHtml(launch.placeId)}"` : ""
+					} type="button">戻る</button>
+				</div>
+				<div class="card">
+					<div class="card-body">
+						${bodyMarkup}
+					</div>
+				</div>
+			</div>
+			${menuMarkup}
+		`;
+
+		this.bindMenuEvents(user);
+		this.bindPlayEvents();
+	}
+
+	buildAkashicFrameUrl(launch: LaunchHoldPlacePlayResult) {
+		const url = new URL(launch.gamePageUrl);
+		url.searchParams.set("config_source", "post_message");
+		url.searchParams.set("parent_origin", location.origin);
+		return url.toString();
+	}
+
+	formatDateTime(value: unknown) {
+		if (!value) return null;
+		let date: Date | null = null;
+		if (typeof value === "string") {
+			date = new Date(value);
+		} else if (value instanceof Date) {
+			date = value;
+		} else if (typeof (value as { toDate?: unknown }).toDate === "function") {
+			date = (value as { toDate: () => Date }).toDate();
+		}
+		if (!date || Number.isNaN(date.getTime())) return null;
+		return new Intl.DateTimeFormat("ja-JP", {
+			month: "numeric",
+			day: "numeric",
+			hour: "2-digit",
+			minute: "2-digit",
+		}).format(date);
+	}
+
+	async loadPlayLaunch(holdPlaceId: string) {
+		this.playLaunchState = {
+			holdPlaceId,
+			loading: true,
+			loaded: false,
+			error: null,
+			launch: null,
+			ending: false,
+		};
+		this.render();
+		try {
+			const response = await launchHoldPlacePlay(this.client, holdPlaceId);
+			if (this.playLaunchState.holdPlaceId !== holdPlaceId) return;
+			this.playLaunchState = {
+				holdPlaceId,
+				loading: false,
+				loaded: true,
+				error: null,
+				launch: response.data,
+				ending: false,
+			};
+		} catch (err) {
+			const message = err instanceof Error ? err.message : "ゲーム起動情報の取得に失敗しました。";
+			if (this.playLaunchState.holdPlaceId !== holdPlaceId) return;
+			this.playLaunchState = {
+				holdPlaceId,
+				loading: false,
+				loaded: true,
+				error: message,
+				launch: null,
+				ending: false,
+			};
+		}
+		this.render();
+	}
+
+	postPlayLaunchConfig(targetOrigin?: string) {
+		const launch = this.playLaunchState.launch;
+		if (!launch) return;
+		const frame = this.rootEl.querySelector<HTMLIFrameElement>("#play-frame");
+		if (!frame?.contentWindow) return;
+		const origin = targetOrigin ?? new URL(launch.gamePageUrl).origin;
+		frame.contentWindow.postMessage(
+			{
+				type: "akashic-system-launch-config",
+				payload: {
+					mode: launch.mode,
+					playId: launch.playId,
+					userId: launch.userId,
+					contentUrl: launch.contentUrl,
+					playToken: launch.playToken,
+					playlogServerUrl: launch.playlogServerUrl,
+				},
+			},
+			origin,
+		);
 	}
 
 	getGridMetrics(places: Place[]) {
@@ -643,6 +903,66 @@ export class App {
 				this.placeState.releaseSubmitting && this.placeState.releaseSubmittingPlaceId === selectedPlace.id;
 			const holdButtonLabel = isHoldSubmitting ? "確保中" : "確保する";
 			const releaseButtonLabel = isReleaseSubmitting ? "解放中" : "解放する";
+			const playStarting =
+				!!holdPlace &&
+				this.placeState.playStarting &&
+				this.placeState.playStartingHoldPlaceId === holdPlace.id;
+			const playEnding =
+				!!holdPlace && this.placeState.playEnding && this.placeState.playEndingHoldPlaceId === holdPlace.id;
+			const joinUrl = holdPlace
+				? new URL(`/play/${encodeURIComponent(holdPlace.id)}`, location.origin).toString()
+				: "";
+			const currentGameTitle = fixedGameTitle;
+			const currentGameDescription = fixedGameDescription;
+			const currentGameDescriptionMarkup = currentGameDescription
+				? `<div class="small text-secondary mb-2">${utils.escapeHtml(currentGameDescription)}</div>`
+				: "";
+			const fixedGameDescriptionMarkup = fixedGameDescription
+				? `<div class="small text-secondary mb-2">${utils.escapeHtml(fixedGameDescription)}</div>`
+				: "";
+			const expireText = this.formatDateTime(holdPlace?.expireAt);
+			let playMarkup = "";
+			if (status === "playing" && holdPlace && !holdPlaceLoading && !holdPlaceError) {
+				if (holdPlace.currentPlayId) {
+					playMarkup = `
+						<div class="mt-3 p-3 border rounded-3 bg-light">
+							<div class="fw-semibold mb-1">${utils.escapeHtml(currentGameTitle)}</div>
+							<div class="small text-muted mb-2">Play ID: ${utils.escapeHtml(holdPlace.currentPlayId)}</div>
+							${currentGameDescriptionMarkup}
+							${expireText ? `<div class="small text-muted mb-2">このPlayは ${utils.escapeHtml(expireText)} まで遊べます。</div>` : ""}
+							<div class="small text-break mb-2">${utils.escapeHtml(joinUrl)}</div>
+							<div class="d-flex flex-wrap gap-2">
+								<button id="place-open-play-button" class="btn btn-primary btn-sm" data-url="${utils.escapeHtml(
+									joinUrl,
+								)}" type="button">ゲームを開く</button>
+								<button id="place-copy-play-button" class="btn btn-outline-secondary btn-sm" data-url="${utils.escapeHtml(
+									joinUrl,
+								)}" type="button">URLをコピー</button>
+								${
+									isSelfHolding
+										? `<button id="place-end-play-button" class="btn btn-outline-secondary btn-sm" data-hold-place-id="${utils.escapeHtml(
+												holdPlace.id,
+											)}" ${playEnding ? "disabled" : ""} type="button">${
+												playEnding ? "終了中..." : "Play終了"
+											}</button>`
+										: ""
+								}
+							</div>
+						</div>
+					`;
+				} else if (isSelfHolding) {
+					playMarkup = `
+						<div class="mt-3 p-3 border rounded-3 bg-light">
+							<div class="small text-muted mb-1">選択中のゲーム</div>
+							<div class="fw-semibold mb-1">${utils.escapeHtml(fixedGameTitle)}</div>
+							${fixedGameDescriptionMarkup}
+							<button id="place-start-play-button" class="btn btn-primary btn-sm" data-place-id="${utils.escapeHtml(
+								selectedPlace.id,
+							)}" ${playStarting ? "disabled" : ""} type="button">${playStarting ? "開始中..." : "遊ぶ"}</button>
+						</div>
+					`;
+				}
+			}
 			let ownerLabel = "";
 			if (status === "playing") {
 				if (holdPlaceLoading) {
@@ -683,6 +1003,7 @@ export class App {
 							)}" ${isReleaseSubmitting ? "disabled" : ""}>${releaseButtonLabel}</button></div>`
 						: ""
 				}
+				${playMarkup}
 			`;
 		}
 
@@ -727,7 +1048,11 @@ export class App {
 				this.placeState.holdSubmitting ||
 				this.placeState.holdSubmittingPlaceId ||
 				this.placeState.releaseSubmitting ||
-				this.placeState.releaseSubmittingPlaceId
+				this.placeState.releaseSubmittingPlaceId ||
+				this.placeState.playStarting ||
+				this.placeState.playStartingHoldPlaceId ||
+				this.placeState.playEnding ||
+				this.placeState.playEndingHoldPlaceId
 			) {
 				this.placeState = {
 					...this.placeState,
@@ -743,6 +1068,10 @@ export class App {
 					holdSubmittingPlaceId: null,
 					releaseSubmitting: false,
 					releaseSubmittingPlaceId: null,
+					playStarting: false,
+					playStartingHoldPlaceId: null,
+					playEnding: false,
+					playEndingHoldPlaceId: null,
 				};
 			}
 			return;
@@ -763,6 +1092,10 @@ export class App {
 				holdSubmittingPlaceId: null,
 				releaseSubmitting: false,
 				releaseSubmittingPlaceId: null,
+				playStarting: false,
+				playStartingHoldPlaceId: null,
+				playEnding: false,
+				playEndingHoldPlaceId: null,
 			};
 		}
 
@@ -1088,6 +1421,82 @@ export class App {
 		}
 	}
 
+	async handleStartPlacePlay(placeId: string) {
+		const holdPlaceId = this.placeState.selectedHoldPlace?.id ?? null;
+		if (this.placeState.playStarting || !holdPlaceId) return;
+		this.placeState = {
+			...this.placeState,
+			playStarting: true,
+			playStartingHoldPlaceId: holdPlaceId,
+		};
+		this.render();
+		try {
+			const response = await startPlacePlay(this.client, placeId);
+			this.showToast("ゲームを開始しました。", "success");
+			const joinPath = response.data.joinPath;
+			if (joinPath) {
+				utils.navigateTo(joinPath);
+			}
+		} catch (err) {
+			const message = err instanceof Error ? err.message : "ゲーム開始に失敗しました。";
+			this.showToast(message, "error");
+		} finally {
+			if (this.placeState.playStartingHoldPlaceId === holdPlaceId) {
+				this.placeState = {
+					...this.placeState,
+					playStarting: false,
+					playStartingHoldPlaceId: null,
+				};
+				this.render();
+			}
+		}
+	}
+
+	async handleEndHoldPlacePlay(holdPlaceId: string) {
+		if (this.placeState.playEnding || this.playLaunchState.ending) return;
+		this.placeState = {
+			...this.placeState,
+			playEnding: true,
+			playEndingHoldPlaceId: holdPlaceId,
+		};
+		this.playLaunchState = {
+			...this.playLaunchState,
+			ending: this.playLaunchState.holdPlaceId === holdPlaceId,
+		};
+		this.render();
+		try {
+			const response = await endHoldPlacePlay(this.client, holdPlaceId);
+			this.showToast("Playを終了しました。", "success");
+			if (this.playLaunchState.holdPlaceId === holdPlaceId) {
+				this.playLaunchState = {
+					...this.playLaunchState,
+					loaded: false,
+					launch: null,
+				};
+				const placeId = response.data.placeId;
+				utils.navigateTo(placeId ? `/place/${encodeURIComponent(placeId)}` : "/");
+			}
+		} catch (err) {
+			const message = err instanceof Error ? err.message : "Play終了に失敗しました。";
+			this.showToast(message, "error");
+		} finally {
+			if (this.placeState.playEndingHoldPlaceId === holdPlaceId) {
+				this.placeState = {
+					...this.placeState,
+					playEnding: false,
+					playEndingHoldPlaceId: null,
+				};
+			}
+			if (this.playLaunchState.holdPlaceId === holdPlaceId) {
+				this.playLaunchState = {
+					...this.playLaunchState,
+					ending: false,
+				};
+			}
+			this.render();
+		}
+	}
+
 	async loadPlaces() {
 		if (this.topState.loading || this.topState.loaded) return;
 		this.topState = { ...this.topState, loading: true, error: null };
@@ -1241,6 +1650,89 @@ export class App {
 				const placeId = releaseButton.dataset.placeId;
 				if (!placeId) return;
 				void this.handleReleasePlace(placeId);
+			});
+		}
+
+		const startPlayButton = this.rootEl.querySelector<HTMLButtonElement>("#place-start-play-button");
+		if (startPlayButton) {
+			startPlayButton.addEventListener("click", () => {
+				const placeId = startPlayButton.dataset.placeId;
+				if (!placeId) return;
+				void this.handleStartPlacePlay(placeId);
+			});
+		}
+
+		const openPlayButton = this.rootEl.querySelector<HTMLButtonElement>("#place-open-play-button");
+		if (openPlayButton) {
+			openPlayButton.addEventListener("click", () => {
+				const url = openPlayButton.dataset.url;
+				if (!url) return;
+				location.href = url;
+			});
+		}
+
+		const copyPlayButton = this.rootEl.querySelector<HTMLButtonElement>("#place-copy-play-button");
+		if (copyPlayButton) {
+			copyPlayButton.addEventListener("click", async () => {
+				const url = copyPlayButton.dataset.url;
+				if (!url) return;
+				try {
+					await navigator.clipboard.writeText(url);
+					this.showToast("URLをコピーしました。", "success");
+				} catch (err) {
+					console.error(err);
+					this.showToast("URLのコピーに失敗しました。", "error");
+				}
+			});
+		}
+
+		const endPlayButton = this.rootEl.querySelector<HTMLButtonElement>("#place-end-play-button");
+		if (endPlayButton) {
+			endPlayButton.addEventListener("click", () => {
+				const holdPlaceId = endPlayButton.dataset.holdPlaceId;
+				if (!holdPlaceId) return;
+				void this.handleEndHoldPlacePlay(holdPlaceId);
+			});
+		}
+	}
+
+	bindPlayEvents() {
+		const backButton = this.rootEl.querySelector<HTMLButtonElement>("#play-back");
+		if (backButton) {
+			backButton.addEventListener("click", () => {
+				const placeId = backButton.dataset.placeId;
+				utils.navigateTo(placeId ? `/place/${encodeURIComponent(placeId)}` : "/");
+			});
+		}
+
+		const frame = this.rootEl.querySelector<HTMLIFrameElement>("#play-frame");
+		if (frame) {
+			frame.addEventListener("load", () => {
+				window.setTimeout(() => this.postPlayLaunchConfig(), 0);
+			});
+		}
+
+		const copyUrlButton = this.rootEl.querySelector<HTMLButtonElement>("#play-copy-url-button");
+		if (copyUrlButton) {
+			copyUrlButton.addEventListener("click", async () => {
+				const url = copyUrlButton.dataset.url;
+				if (!url) return;
+				try {
+					await navigator.clipboard.writeText(url);
+					this.showToast("URLをコピーしました。", "success");
+				} catch (err) {
+					console.error(err);
+					this.showToast("URLのコピーに失敗しました。", "error");
+				}
+			});
+		}
+
+		const endButton = this.rootEl.querySelector<HTMLButtonElement>("#play-end-button");
+		if (endButton) {
+			endButton.addEventListener("click", () => {
+				const holdPlaceId = endButton.dataset.holdPlaceId;
+				if (!holdPlaceId) return;
+				void this.handleEndHoldPlacePlay(holdPlaceId);
 			});
 		}
 	}

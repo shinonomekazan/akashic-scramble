@@ -28,14 +28,31 @@ export type Route =
 	| { name: "my" }
 	| { name: "my-edit" }
 	| { name: "top" }
-	| { name: "place"; placeId: string };
+	| { name: "place"; placeId: string }
+	| { name: "play"; holdPlaceId: string };
+
+function decodeRouteComponent(value: string) {
+	try {
+		const decoded = decodeURIComponent(value);
+		if (!decoded || decoded.includes("/")) return undefined;
+		return decoded;
+	} catch {
+		return undefined;
+	}
+}
 
 export function parseRoute(): Route {
 	const path = window.location.pathname || "/";
 	if (path.startsWith("/place/")) {
-		const placeId = decodeURIComponent(path.replace("/place/", ""));
+		const placeId = decodeRouteComponent(path.replace("/place/", ""));
 		if (placeId) {
 			return { name: "place", placeId };
+		}
+	}
+	if (path.startsWith("/play/")) {
+		const holdPlaceId = decodeRouteComponent(path.replace("/play/", ""));
+		if (holdPlaceId) {
+			return { name: "play", holdPlaceId };
 		}
 	}
 	if (path.startsWith("/my/edit")) {

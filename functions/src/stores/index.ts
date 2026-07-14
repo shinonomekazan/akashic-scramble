@@ -2,11 +2,34 @@ import { UserProfile } from "../types";
 import { Firestore, Timestamp, FieldValue, Transaction } from "firebase-admin/firestore";
 import { eraseUndefined } from "../utils";
 import * as fw from "../fw";
-import { HoldPlace, Place, PlaceBehaviour, PlaceHoldableTimeBehaviour } from "../types/firestore";
+import type { HoldPlacePlayInfo } from "../resolvers/holdPlaces";
+import {
+	HoldPlace,
+	Place,
+	PlaceBehaviour,
+	PlaceDefaultPermissionBehaviour,
+	PlaceHoldableTimeBehaviour,
+	Play,
+	PlayPermission,
+} from "../types/firestore";
+
+export interface EndedHoldPlaceResult {
+	holdPlaceId: string;
+	placeId?: string;
+	currentPlayId?: string;
+}
 
 // PlaceBehaviour から holdableTime バリアントを絞り込むための型ガード
 function isPlaceHoldableTimeBehaviour(behaviour: PlaceBehaviour): behaviour is PlaceHoldableTimeBehaviour {
 	return behaviour.type === "holdableTime";
+}
+
+function isPlaceDefaultPermissionBehaviour(behaviour: PlaceBehaviour): behaviour is PlaceDefaultPermissionBehaviour {
+	return behaviour.type === "defaultPermission";
+}
+
+function resolveDefaultPermission(behaviours: PlaceBehaviour[]): PlayPermission {
+	return behaviours.find(isPlaceDefaultPermissionBehaviour)?.permission ?? "viewer";
 }
 
 function resolveHoldExpireAt(behaviours: PlaceBehaviour[], now: Timestamp) {
@@ -29,32 +52,39 @@ async function endHoldPlaceTransaction(
 		now?: Timestamp;
 		allowMissing?: boolean;
 		allowAlreadyEnded?: boolean;
+		requireSameCurrentPlayId?: boolean;
+		expectedCurrentPlayId?: string;
 	},
 ) {
 	const holdPlaceRef = firestore.collection("holdPlaces").doc(input.holdPlaceId);
 	const holdPlaceSnap = await transaction.get(holdPlaceRef);
 	if (!holdPlaceSnap.exists) {
-		if (input.allowMissing) return false;
+		if (input.allowMissing) return null;
 		throw new fw.types.NotFound(`HoldPlace with id ${input.holdPlaceId} not found`);
 	}
 
 	const holdPlaceData = holdPlaceSnap.data() as Partial<HoldPlace>;
 	if (holdPlaceData.endedAt != null) {
-		if (input.allowAlreadyEnded) return false;
+		if (input.allowAlreadyEnded) return null;
 		throw new fw.types.Duplicate("HoldPlace is already ended");
 	}
 
-	if (input.requireOwner && holdPlaceData.holdUserId && holdPlaceData.holdUserId !== input.holdUserId) {
+	const holdUserId = holdPlaceData.holdUserId;
+	if (input.requireOwner && holdUserId && holdUserId !== input.holdUserId) {
 		throw new fw.types.Forbidden("HoldPlace is owned by another user");
 	}
 
 	if (input.expireAtRequired != null) {
-		if (holdPlaceData.expireAt === undefined) return false;
-		if (holdPlaceData.expireAt.toMillis() > input.expireAtRequired.toMillis()) return false;
+		if (holdPlaceData.expireAt === undefined) return null;
+		if (holdPlaceData.expireAt.toMillis() > input.expireAtRequired.toMillis()) return null;
 	}
 
 	const now = input.now ?? Timestamp.now();
 	const placeId = input.placeId ?? holdPlaceData.placeId;
+	const currentPlayId = holdPlaceData.currentPlayId;
+	if (input.requireSameCurrentPlayId && currentPlayId !== input.expectedCurrentPlayId) return null;
+	const playRef = currentPlayId ? firestore.collection("plays").doc(currentPlayId) : undefined;
+	const playSnap = playRef ? await transaction.get(playRef) : undefined;
 	if (placeId != undefined) {
 		const placeRef = firestore.collection("places").doc(placeId);
 		const placeSnap = await transaction.get(placeRef);
@@ -69,6 +99,13 @@ async function endHoldPlaceTransaction(
 		}
 	}
 
+	if (playRef && playSnap?.exists) {
+		await transaction.update(playRef, {
+			state: "ended",
+			updatedAt: now,
+		});
+	}
+
 	await transaction.update(
 		holdPlaceRef,
 		eraseUndefined({
@@ -78,7 +115,36 @@ async function endHoldPlaceTransaction(
 		}),
 	);
 
-	return true;
+	return {
+		holdPlaceId: holdPlaceRef.id,
+		placeId,
+		currentPlayId,
+	};
+}
+
+function readHoldPlacePlaceId(holdPlaceId: string, holdPlaceData: Partial<HoldPlace>) {
+	if (typeof holdPlaceData.placeId === "string" && holdPlaceData.placeId) {
+		return holdPlaceData.placeId;
+	}
+	throw new fw.types.InternalServerError(`HoldPlace ${holdPlaceId} has no placeId`);
+}
+
+function normalizeHoldPlacePlayInfo(
+	holdPlaceId: string,
+	holdPlaceData: Partial<HoldPlace>,
+	playData?: Partial<Play>,
+): HoldPlacePlayInfo {
+	return {
+		holdPlaceId,
+		placeId: readHoldPlacePlaceId(holdPlaceId, holdPlaceData),
+		holdUserId: holdPlaceData.holdUserId,
+		currentPlayId: holdPlaceData.currentPlayId,
+		providerId: playData?.providerId,
+		contentCode: playData?.contentCode,
+		contentUrl: playData?.contentUrl,
+		ownerUserId: playData?.ownerUserId,
+		expireAt: holdPlaceData.expireAt,
+	};
 }
 
 export function storeUser(firestore: Firestore, user: Omit<UserProfile, "createdAt" | "updatedAt">) {
@@ -143,8 +209,7 @@ export function holdPlace(
 		}
 
 		const placeData = placeSnap.data() as Partial<Place>;
-		const currentHoldPlaceId =
-			typeof placeData.currentHoldPlaceId === "string" ? placeData.currentHoldPlaceId : undefined;
+		const currentHoldPlaceId = placeData.currentHoldPlaceId;
 		if (currentHoldPlaceId) {
 			throw new fw.types.Duplicate("Place is already held");
 		}
@@ -189,13 +254,12 @@ export function releaseHoldPlace(
 		}
 
 		const placeData = placeSnap.data() as Partial<Place>;
-		const currentHoldPlaceId =
-			typeof placeData.currentHoldPlaceId === "string" ? placeData.currentHoldPlaceId : undefined;
+		const currentHoldPlaceId = placeData.currentHoldPlaceId;
 		if (!currentHoldPlaceId) {
 			throw new fw.types.BadRequest("Place is not held");
 		}
 
-		await endHoldPlaceTransaction(firestore, transaction, {
+		return endHoldPlaceTransaction(firestore, transaction, {
 			holdPlaceId: currentHoldPlaceId,
 			holdUserId: input.holdUserId,
 			requireOwner: true,
@@ -210,16 +274,132 @@ export function expireHoldPlace(
 	input: {
 		holdPlaceId: string;
 		now: Timestamp;
+		currentPlayId?: string;
 	},
 ) {
 	return firestore.runTransaction(async (transaction) => {
-		await endHoldPlaceTransaction(firestore, transaction, {
+		return endHoldPlaceTransaction(firestore, transaction, {
 			holdPlaceId: input.holdPlaceId,
 			requireOwner: false,
 			expireAtRequired: input.now,
 			now: input.now,
 			allowMissing: true,
 			allowAlreadyEnded: true,
+			requireSameCurrentPlayId: true,
+			expectedCurrentPlayId: input.currentPlayId,
 		});
+	});
+}
+
+export function setHoldPlacePlay(
+	firestore: Firestore,
+	input: {
+		holdPlaceId: string;
+		holdUserId?: string;
+		systemPlayId: string;
+		providerId: string;
+		contentCode: string;
+		contentUrl: string;
+		ownerUserId: string;
+	},
+) {
+	return firestore.runTransaction(async (transaction) => {
+		const holdPlaceRef = firestore.collection("holdPlaces").doc(input.holdPlaceId);
+		const holdPlaceSnap = await transaction.get(holdPlaceRef);
+		if (!holdPlaceSnap.exists) {
+			throw new fw.types.NotFound(`HoldPlace with id ${input.holdPlaceId} not found`);
+		}
+
+		const holdPlaceData = holdPlaceSnap.data() as Partial<HoldPlace>;
+		if (holdPlaceData.endedAt != null) {
+			throw new fw.types.BadRequest("HoldPlace is already ended");
+		}
+		const holdUserId = holdPlaceData.holdUserId;
+		if (holdUserId && holdUserId !== input.holdUserId) {
+			throw new fw.types.Forbidden("HoldPlace is owned by another user");
+		}
+		const currentPlayId = holdPlaceData.currentPlayId;
+		if (currentPlayId) {
+			const playSnap = await transaction.get(firestore.collection("plays").doc(currentPlayId));
+			if (!playSnap.exists) {
+				throw new fw.types.InternalServerError(`Play with id ${currentPlayId} not found`);
+			}
+			return normalizeHoldPlacePlayInfo(holdPlaceRef.id, holdPlaceData, playSnap.data() as Partial<Play>);
+		}
+
+		const now = Timestamp.now();
+		const behaviours = Array.isArray(holdPlaceData.behaviours) ? holdPlaceData.behaviours : [];
+		const play: Play = {
+			placeId: readHoldPlacePlaceId(holdPlaceRef.id, holdPlaceData),
+			holdPlaceId: holdPlaceRef.id,
+			providerId: input.providerId,
+			contentCode: input.contentCode,
+			contentUrl: input.contentUrl,
+			state: "playing",
+			ownerUserId: input.ownerUserId,
+			joinedPlayerIds: [],
+			defaultPermission: resolveDefaultPermission(behaviours),
+			expireAt: holdPlaceData.expireAt,
+			createdAt: now,
+			updatedAt: now,
+		};
+		const nextHoldPlaceData = {
+			currentPlayId: input.systemPlayId,
+			updatedAt: now,
+		};
+		await transaction.set(firestore.collection("plays").doc(input.systemPlayId), eraseUndefined(play));
+		await transaction.update(holdPlaceRef, nextHoldPlaceData);
+
+		return normalizeHoldPlacePlayInfo(
+			holdPlaceRef.id,
+			{
+				...holdPlaceData,
+				...nextHoldPlaceData,
+			},
+			play,
+		);
+	});
+}
+
+export function clearHoldPlacePlay(
+	firestore: Firestore,
+	input: {
+		holdPlaceId: string;
+		holdUserId?: string;
+		requireOwner: boolean;
+	},
+) {
+	return firestore.runTransaction(async (transaction) => {
+		const holdPlaceRef = firestore.collection("holdPlaces").doc(input.holdPlaceId);
+		const holdPlaceSnap = await transaction.get(holdPlaceRef);
+		if (!holdPlaceSnap.exists) {
+			throw new fw.types.NotFound(`HoldPlace with id ${input.holdPlaceId} not found`);
+		}
+
+		const holdPlaceData = holdPlaceSnap.data() as Partial<HoldPlace>;
+		const holdUserId = holdPlaceData.holdUserId;
+		if (input.requireOwner && holdUserId && holdUserId !== input.holdUserId) {
+			throw new fw.types.Forbidden("HoldPlace is owned by another user");
+		}
+
+		const currentPlayId = holdPlaceData.currentPlayId;
+		const playRef = currentPlayId ? firestore.collection("plays").doc(currentPlayId) : undefined;
+		const playSnap = playRef ? await transaction.get(playRef) : undefined;
+		const playInfo = normalizeHoldPlacePlayInfo(
+			holdPlaceRef.id,
+			holdPlaceData,
+			playSnap?.exists ? (playSnap.data() as Partial<Play>) : undefined,
+		);
+		if (playRef && playSnap?.exists) {
+			await transaction.update(playRef, {
+				state: "ended",
+				updatedAt: Timestamp.now(),
+			});
+		}
+		await transaction.update(holdPlaceRef, {
+			currentPlayId: FieldValue.delete(),
+			updatedAt: Timestamp.now(),
+		});
+		return playInfo;
 	});
 }
