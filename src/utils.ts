@@ -31,16 +31,24 @@ export type Route =
 	| { name: "place"; placeId: string }
 	| { name: "play"; holdPlaceId: string };
 
+function decodeRouteComponent(value: string) {
+	try {
+		return decodeURIComponent(value);
+	} catch {
+		return undefined;
+	}
+}
+
 export function parseRoute(): Route {
 	const path = window.location.pathname || "/";
 	if (path.startsWith("/place/")) {
-		const placeId = decodeURIComponent(path.replace("/place/", ""));
+		const placeId = decodeRouteComponent(path.replace("/place/", ""));
 		if (placeId) {
 			return { name: "place", placeId };
 		}
 	}
 	if (path.startsWith("/play/")) {
-		const holdPlaceId = decodeURIComponent(path.replace("/play/", ""));
+		const holdPlaceId = decodeRouteComponent(path.replace("/play/", ""));
 		if (holdPlaceId) {
 			return { name: "play", holdPlaceId };
 		}

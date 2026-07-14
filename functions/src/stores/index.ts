@@ -2,6 +2,7 @@ import { UserProfile } from "../types";
 import { Firestore, Timestamp, FieldValue, Transaction } from "firebase-admin/firestore";
 import { eraseUndefined } from "../utils";
 import * as fw from "../fw";
+import type { HoldPlacePlayInfo } from "../resolvers/holdPlaces";
 import {
 	HoldPlace,
 	Place,
@@ -16,18 +17,6 @@ export interface EndedHoldPlaceResult {
 	holdPlaceId: string;
 	placeId?: string;
 	currentPlayId?: string;
-}
-
-export interface HoldPlacePlayInfo {
-	holdPlaceId: string;
-	placeId: string;
-	holdUserId?: string;
-	currentPlayId?: string;
-	providerId?: string;
-	contentCode?: string;
-	contentUrl?: string;
-	ownerUserId?: string;
-	expireAt?: Timestamp;
 }
 
 // PlaceBehaviour から holdableTime バリアントを絞り込むための型ガード
@@ -63,6 +52,8 @@ async function endHoldPlaceTransaction(
 		now?: Timestamp;
 		allowMissing?: boolean;
 		allowAlreadyEnded?: boolean;
+		requireSameCurrentPlayId?: boolean;
+		expectedCurrentPlayId?: string;
 	},
 ) {
 	const holdPlaceRef = firestore.collection("holdPlaces").doc(input.holdPlaceId);
@@ -91,6 +82,7 @@ async function endHoldPlaceTransaction(
 	const now = input.now ?? Timestamp.now();
 	const placeId = input.placeId ?? holdPlaceData.placeId;
 	const currentPlayId = holdPlaceData.currentPlayId;
+	if (input.requireSameCurrentPlayId && currentPlayId !== input.expectedCurrentPlayId) return null;
 	const playRef = currentPlayId ? firestore.collection("plays").doc(currentPlayId) : undefined;
 	const playSnap = playRef ? await transaction.get(playRef) : undefined;
 	if (placeId != undefined) {
@@ -282,6 +274,7 @@ export function expireHoldPlace(
 	input: {
 		holdPlaceId: string;
 		now: Timestamp;
+		currentPlayId?: string;
 	},
 ) {
 	return firestore.runTransaction(async (transaction) => {
@@ -292,52 +285,10 @@ export function expireHoldPlace(
 			now: input.now,
 			allowMissing: true,
 			allowAlreadyEnded: true,
+			requireSameCurrentPlayId: true,
+			expectedCurrentPlayId: input.currentPlayId,
 		});
 	});
-}
-
-export async function getCurrentHoldPlacePlayInfo(
-	firestore: Firestore,
-	input: {
-		placeId: string;
-		holdUserId?: string;
-		requireOwner: boolean;
-	},
-): Promise<HoldPlacePlayInfo> {
-	const placeSnap = await firestore.collection("places").doc(input.placeId).get();
-	if (!placeSnap.exists) {
-		throw new fw.types.NotFound(`Place with id ${input.placeId} not found`);
-	}
-
-	const placeData = placeSnap.data() as Partial<Place>;
-	const currentHoldPlaceId = placeData.currentHoldPlaceId;
-	if (!currentHoldPlaceId) {
-		throw new fw.types.BadRequest("Place is not held");
-	}
-
-	const holdPlaceSnap = await firestore.collection("holdPlaces").doc(currentHoldPlaceId).get();
-	if (!holdPlaceSnap.exists) {
-		throw new fw.types.NotFound(`HoldPlace with id ${currentHoldPlaceId} not found`);
-	}
-
-	const holdPlaceData = holdPlaceSnap.data() as Partial<HoldPlace>;
-	if (holdPlaceData.endedAt != null) {
-		throw new fw.types.BadRequest("HoldPlace is already ended");
-	}
-	const holdUserId = holdPlaceData.holdUserId;
-	if (input.requireOwner && holdUserId && holdUserId !== input.holdUserId) {
-		throw new fw.types.Forbidden("HoldPlace is owned by another user");
-	}
-
-	const currentPlayId = holdPlaceData.currentPlayId;
-	if (!currentPlayId) {
-		return normalizeHoldPlacePlayInfo(holdPlaceSnap.id, holdPlaceData);
-	}
-	const playSnap = await firestore.collection("plays").doc(currentPlayId).get();
-	if (!playSnap.exists) {
-		throw new fw.types.InternalServerError(`Play with id ${currentPlayId} not found`);
-	}
-	return normalizeHoldPlacePlayInfo(holdPlaceSnap.id, holdPlaceData, playSnap.data() as Partial<Play>);
 }
 
 export function setHoldPlacePlay(
@@ -408,32 +359,6 @@ export function setHoldPlacePlay(
 			play,
 		);
 	});
-}
-
-export async function getHoldPlacePlayInfo(
-	firestore: Firestore,
-	input: {
-		holdPlaceId: string;
-	},
-): Promise<HoldPlacePlayInfo> {
-	const holdPlaceSnap = await firestore.collection("holdPlaces").doc(input.holdPlaceId).get();
-	if (!holdPlaceSnap.exists) {
-		throw new fw.types.NotFound(`HoldPlace with id ${input.holdPlaceId} not found`);
-	}
-
-	const holdPlaceData = holdPlaceSnap.data() as Partial<HoldPlace>;
-	if (holdPlaceData.endedAt != null) {
-		throw new fw.types.BadRequest("HoldPlace is already ended");
-	}
-	const playInfo = normalizeHoldPlacePlayInfo(holdPlaceSnap.id, holdPlaceData);
-	if (!playInfo.currentPlayId) {
-		throw new fw.types.BadRequest("Play is not started");
-	}
-	const playSnap = await firestore.collection("plays").doc(playInfo.currentPlayId).get();
-	if (!playSnap.exists) {
-		throw new fw.types.InternalServerError(`Play with id ${playInfo.currentPlayId} not found`);
-	}
-	return normalizeHoldPlacePlayInfo(holdPlaceSnap.id, holdPlaceData, playSnap.data() as Partial<Play>);
 }
 
 export function clearHoldPlacePlay(

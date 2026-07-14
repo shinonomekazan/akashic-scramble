@@ -33,34 +33,21 @@ export interface ResolvedGameDriveContent {
 	contentUrl: string;
 }
 
-function normalizeBaseUrl(value: string) {
-	return value.trim().replace(/\/+$/, "");
-}
-
 function optionalEnv(key: string) {
 	const value = process.env[key]?.trim();
 	return value || undefined;
 }
 
 function joinPublicUrl(baseUrl: string, objectPath: string) {
-	const encodedPath = objectPath
-		.replace(/^\/+/, "")
-		.split("/")
-		.filter(Boolean)
-		.map((segment) => encodeURIComponent(segment))
-		.join("/");
-	return `${normalizeBaseUrl(baseUrl)}/${encodedPath}`;
+	return `${baseUrl}/${objectPath}`;
 }
 
 export function loadGameDriveConfig(): GameDriveConfig {
 	return {
-		apiBaseUrl: normalizeBaseUrl(
+		apiBaseUrl:
 			process.env.GAME_DRIVE_API_BASE_URL ?? "https://asia-northeast1-akashic-game-drive.cloudfunctions.net/api",
-		),
 		apiKey: optionalEnv("GAME_DRIVE_API_KEY"),
-		contentCdnBaseUrl: normalizeBaseUrl(
-			process.env.GAME_DRIVE_CONTENT_CDN_BASE_URL ?? "https://drive.akashic.shinonomekazan.com",
-		),
+		contentCdnBaseUrl: process.env.GAME_DRIVE_CONTENT_CDN_BASE_URL ?? "https://drive.akashic.shinonomekazan.com",
 	};
 }
 
@@ -72,15 +59,14 @@ async function requestJson<T>(url: string, options: { method: string; headers?: 
 			...(options.headers ?? {}),
 		},
 	});
-	const text = await response.text();
 	let json: T;
 	try {
-		json = text ? (JSON.parse(text) as T) : ({} as T);
-	} catch (error) {
-		throw new Error(`Game Drive API returned invalid JSON: ${text.slice(0, 120)}`);
+		json = (await response.json()) as T;
+	} catch {
+		throw new Error("Game Drive API returned invalid JSON.");
 	}
 	if (!response.ok) {
-		throw new Error(`Game Drive API error: HTTP ${response.status} ${text.slice(0, 120)}`);
+		throw new Error(`Game Drive API error: HTTP ${response.status}`);
 	}
 	return json;
 }

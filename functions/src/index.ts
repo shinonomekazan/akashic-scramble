@@ -9,6 +9,7 @@ import { AppConfig, Config } from "./config";
 import * as fw from "./fw";
 import { register } from "./register";
 import { expireHoldPlace } from "./stores";
+import { getExpirableHoldPlacePlayInfo } from "./resolvers/holdPlaces";
 import { AkashicSystemClient } from "./services/akashicSystem";
 
 let app: App | undefined = undefined;
@@ -45,6 +46,19 @@ function processRequest(app: App, apiKey: string | undefined, request: Request, 
 	}
 	return app.app(request, response);
 }
+
+function shouldStopAkashicPlay(status: string) {
+	return status === "preparing" || status === "running";
+}
+
+async function stopAkashicPlayIfNeeded(playId: string) {
+	const system = new AkashicSystemClient();
+	const play = await system.getPlay(playId);
+	if (shouldStopAkashicPlay(play.status)) {
+		await system.stopPlay(playId);
+	}
+}
+
 export const api = onRequest({ region: "asia-northeast1" }, (request, response) => {
 	if (app == null) {
 		return fw
@@ -72,16 +86,24 @@ export const expireHoldPlaces = onSchedule({ region: "asia-northeast1", schedule
 	if (snapshot.empty) return;
 
 	for (const doc of snapshot.docs) {
-		const endedHoldPlace = await expireHoldPlace(firestore, {
-			holdPlaceId: doc.id,
-			now,
-		});
-		if (endedHoldPlace?.currentPlayId && process.env.AKASHIC_SYSTEM_API_KEY) {
-			try {
-				await new AkashicSystemClient().stopPlay(endedHoldPlace.currentPlayId);
-			} catch (error) {
-				console.warn(error);
+		try {
+			const playInfo = await getExpirableHoldPlacePlayInfo(firestore, {
+				holdPlaceId: doc.id,
+				now,
+			});
+			if (!playInfo) continue;
+
+			if (playInfo.currentPlayId) {
+				await stopAkashicPlayIfNeeded(playInfo.currentPlayId);
 			}
+
+			await expireHoldPlace(firestore, {
+				holdPlaceId: doc.id,
+				now,
+				currentPlayId: playInfo.currentPlayId,
+			});
+		} catch (error) {
+			console.warn(`Failed to expire holdPlace ${doc.id}`, error);
 		}
 	}
 });

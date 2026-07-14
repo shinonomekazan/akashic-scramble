@@ -1,3 +1,5 @@
+import * as fw from "../fw";
+
 export type AkashicExecutionMode = "active" | "passive";
 
 export interface AkashicPlay {
@@ -51,20 +53,14 @@ const passivePermission: AkashicPermission = {
 	maxEventPriority: 2,
 };
 
-function normalizeBaseUrl(value: string) {
-	return value.trim().replace(/\/+$/, "");
-}
-
 export function loadAkashicSystemConfig(): AkashicSystemConfig {
 	const apiKey = process.env.AKASHIC_SYSTEM_API_KEY;
 	if (!apiKey) {
-		throw new Error("AKASHIC_SYSTEM_API_KEY is not configured.");
+		throw new fw.types.ServiceUnavailableError("Akashic System is not configured.");
 	}
 
 	return {
-		apiBaseUrl: normalizeBaseUrl(
-			process.env.AKASHIC_SYSTEM_API_BASE_URL ?? "https://akashic-system.shinonomekazan.com/api",
-		),
+		apiBaseUrl: process.env.AKASHIC_SYSTEM_API_BASE_URL ?? "https://akashic-system.shinonomekazan.com/api",
 		apiKey,
 		gamePageUrl:
 			process.env.AKASHIC_SYSTEM_GAME_PAGE_URL ??
@@ -87,15 +83,14 @@ async function requestJson<T>(
 		},
 		body: payload,
 	});
-	const text = await response.text();
 	let json: T;
 	try {
-		json = text ? (JSON.parse(text) as T) : ({} as T);
-	} catch (error) {
-		throw new Error(`Akashic System returned invalid JSON: ${text.slice(0, 120)}`);
+		json = (await response.json()) as T;
+	} catch {
+		throw new Error("Akashic System returned invalid JSON.");
 	}
 	if (!response.ok) {
-		throw new Error(`Akashic System API error: HTTP ${response.status} ${text.slice(0, 120)}`);
+		throw new Error(`Akashic System API error: HTTP ${response.status}`);
 	}
 	return json;
 }
@@ -122,6 +117,10 @@ export class AkashicSystemClient {
 
 	createPlay(gameCode: string) {
 		return this.request<AkashicPlay>("POST", "/v1.0/plays", { gameCode });
+	}
+
+	getPlay(playId: string) {
+		return this.request<AkashicPlay>("GET", `/v1.0/plays/${encodeURIComponent(playId)}`);
 	}
 
 	createToken(playId: string, userId: string, mode: AkashicExecutionMode) {

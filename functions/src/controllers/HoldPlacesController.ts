@@ -4,7 +4,8 @@ import * as validators from "express-validator";
 import * as fw from "../fw";
 import * as params from "../params";
 import { Router } from "express";
-import { clearHoldPlacePlay, getHoldPlacePlayInfo } from "../stores";
+import { clearHoldPlacePlay } from "../stores";
+import { getHoldPlacePlayInfo } from "../resolvers/holdPlaces";
 import { AkashicExecutionMode, AkashicSystemClient, loadAkashicSystemConfig } from "../services/akashicSystem";
 import { resolvePlayContentInfo } from "../services/playContent";
 

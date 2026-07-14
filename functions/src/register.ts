@@ -4,7 +4,6 @@ import * as fw from "./fw";
 
 export function register(app: App) {
 	app.enableCors("X-API-KEY");
-	app.enableCredentials();
 
 	app.register({
 		"/": controllers.SystemController,

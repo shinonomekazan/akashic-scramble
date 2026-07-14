@@ -4,7 +4,8 @@ import * as validators from "express-validator";
 import * as fw from "../fw";
 import * as params from "../params";
 import { Router } from "express";
-import { getCurrentHoldPlacePlayInfo, holdPlace, releaseHoldPlace, setHoldPlacePlay } from "../stores";
+import { holdPlace, releaseHoldPlace, setHoldPlacePlay } from "../stores";
+import { getCurrentHoldPlacePlayInfo } from "../resolvers/holdPlaces";
 import { AkashicSystemClient, loadAkashicSystemConfig } from "../services/akashicSystem";
 import { buildAkashicGameCode, DEFAULT_SCRAMBLE_PLAY_CONTENT, resolvePlayContentInfo } from "../services/playContent";
 

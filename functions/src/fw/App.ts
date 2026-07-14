@@ -6,6 +6,21 @@ import { AppConfig } from "./config";
 
 type expressVerifyFunction = (req: IncomingMessage, res: ServerResponse, buf: Buffer, encoding: string) => void;
 
+const SCRAMBLE_HOSTING_PREVIEW_ORIGIN = /^https:\/\/akashic-scramble--[a-z0-9-]+\.web\.app$/;
+
+function isAllowedCorsOrigin(origin: string) {
+	if (origin === "https://akashic-scramble.web.app") return true;
+	if (origin === "https://akashic-scramble.firebaseapp.com") return true;
+	if (SCRAMBLE_HOSTING_PREVIEW_ORIGIN.test(origin)) return true;
+
+	try {
+		const url = new URL(origin);
+		return (url.hostname === "localhost" || url.hostname === "127.0.0.1") && url.protocol === "http:";
+	} catch {
+		return false;
+	}
+}
+
 // eslint-disable-next-line import/prefer-default-export
 export class App<T extends AppConfig> {
 	readonly app: express.Express;
@@ -20,7 +35,11 @@ export class App<T extends AppConfig> {
 
 	enableCors(...customHeaders: string[]) {
 		this.app.use((req, res, next) => {
-			res.header("Access-Control-Allow-Origin", req.headers.origin);
+			const origin = req.headers.origin;
+			if (typeof origin === "string" && isAllowedCorsOrigin(origin)) {
+				res.header("Access-Control-Allow-Origin", origin);
+				res.header("Vary", "Origin");
+			}
 			res.header(
 				"Access-Control-Allow-Headers",
 				["Origin", "X-Requested-With", "Content-Type", "Accept", "Authorization"]
