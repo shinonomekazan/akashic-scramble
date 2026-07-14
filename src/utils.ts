@@ -33,7 +33,9 @@ export type Route =
 
 function decodeRouteComponent(value: string) {
 	try {
-		return decodeURIComponent(value);
+		const decoded = decodeURIComponent(value);
+		if (!decoded || decoded.includes("/")) return undefined;
+		return decoded;
 	} catch {
 		return undefined;
 	}

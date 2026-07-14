@@ -25,13 +25,13 @@ jobs:
         run: cp ./functions/.env.production ./functions/.env
       - name: Add production function secrets
         env:
-          PRODUCTION_AKASHIC_SYSTEM_API_KEY: ${{ secrets.PRODUCTION_AKASHIC_SYSTEM_API_KEY }}
+          AKASHIC_SYSTEM_API_KEY: ${{ secrets.AKASHIC_SYSTEM_API_KEY }}
         run: |
-          if [ -z "$PRODUCTION_AKASHIC_SYSTEM_API_KEY" ]; then
-            echo "PRODUCTION_AKASHIC_SYSTEM_API_KEY is not configured." >&2
+          if [ -z "$AKASHIC_SYSTEM_API_KEY" ]; then
+            echo "AKASHIC_SYSTEM_API_KEY is not configured." >&2
             exit 1
           fi
-          printf 'AKASHIC_SYSTEM_API_KEY=%s\n' "$PRODUCTION_AKASHIC_SYSTEM_API_KEY" >> ./functions/.env
+          printf 'AKASHIC_SYSTEM_API_KEY=%s\n' "$AKASHIC_SYSTEM_API_KEY" >> ./functions/.env
       - name: npm ci
         run: npm ci && npm --prefix ./functions ci
       - name: Deploy functions

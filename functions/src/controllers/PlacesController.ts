@@ -19,7 +19,14 @@ export class PlacesController extends BaseController {
 		const router = super.register(basePath);
 		this.registerRoute(router, "POST", "/:id/hold", this.hold, [
 			fw.params.InstantValidator(
-				[params.headerBearerTokenValidator(), validators.param("id").isString().notEmpty()],
+				[
+					params.headerBearerTokenValidator(),
+					validators
+						.param("id")
+						.isString()
+						.notEmpty()
+						.matches(/^[^/]+$/),
+				],
 				(context) =>
 					({
 						authorization: context.req.headers.authorization,
@@ -30,7 +37,14 @@ export class PlacesController extends BaseController {
 
 		this.registerRoute(router, "POST", "/:id/release", this.release, [
 			fw.params.InstantValidator(
-				[params.headerBearerTokenValidator(), validators.param("id").isString().notEmpty()],
+				[
+					params.headerBearerTokenValidator(),
+					validators
+						.param("id")
+						.isString()
+						.notEmpty()
+						.matches(/^[^/]+$/),
+				],
 				(context) =>
 					({
 						authorization: context.req.headers.authorization,
@@ -41,7 +55,14 @@ export class PlacesController extends BaseController {
 
 		this.registerRoute(router, "POST", "/:id/play/start", this.startPlay, [
 			fw.params.InstantValidator(
-				[params.headerBearerTokenValidator(), validators.param("id").isString().notEmpty()],
+				[
+					params.headerBearerTokenValidator(),
+					validators
+						.param("id")
+						.isString()
+						.notEmpty()
+						.matches(/^[^/]+$/),
+				],
 				(context) =>
 					({
 						authorization: context.req.headers.authorization,

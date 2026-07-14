@@ -201,7 +201,13 @@ export class App {
 		});
 		window.addEventListener("message", (event) => {
 			if (event.data?.type !== "akashic-system-launch-ready") return;
-			this.postPlayLaunchConfig(event.origin);
+			const launch = this.playLaunchState.launch;
+			if (!launch) return;
+			const frame = this.rootEl.querySelector<HTMLIFrameElement>("#play-frame");
+			if (!frame?.contentWindow || event.source !== frame.contentWindow) return;
+			const expectedOrigin = new URL(launch.gamePageUrl).origin;
+			if (event.origin !== expectedOrigin) return;
+			this.postPlayLaunchConfig(expectedOrigin);
 		});
 	}
 

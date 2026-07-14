@@ -20,7 +20,14 @@ export class HoldPlacesController extends BaseController {
 
 		this.registerRoute(router, "POST", "/:id/play/launch", this.launchPlay, [
 			fw.params.InstantValidator(
-				[params.headerBearerTokenValidator(), validators.param("id").isString().notEmpty()],
+				[
+					params.headerBearerTokenValidator(),
+					validators
+						.param("id")
+						.isString()
+						.notEmpty()
+						.matches(/^[^/]+$/),
+				],
 				(context) =>
 					({
 						authorization: context.req.headers.authorization,
@@ -31,7 +38,14 @@ export class HoldPlacesController extends BaseController {
 
 		this.registerRoute(router, "POST", "/:id/play/end", this.endPlay, [
 			fw.params.InstantValidator(
-				[params.headerBearerTokenValidator(), validators.param("id").isString().notEmpty()],
+				[
+					params.headerBearerTokenValidator(),
+					validators
+						.param("id")
+						.isString()
+						.notEmpty()
+						.matches(/^[^/]+$/),
+				],
 				(context) =>
 					({
 						authorization: context.req.headers.authorization,
