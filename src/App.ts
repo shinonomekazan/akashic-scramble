@@ -95,6 +95,7 @@ export class App {
 	placeWatchId: string | null;
 	holdPlaceWatchUnsub: (() => void) | null;
 	holdPlaceWatchId: string | null;
+	endedPlayIdPendingSync: string | null;
 	topPointerState: TopPointerState;
 
 	constructor(config: AppConfig = appConfig as AppConfig) {
@@ -167,6 +168,7 @@ export class App {
 		this.placeWatchId = null;
 		this.holdPlaceWatchUnsub = null;
 		this.holdPlaceWatchId = null;
+		this.endedPlayIdPendingSync = null;
 		this.topPointerState = {
 			pointerId: null,
 			startClientX: 0,
@@ -1243,9 +1245,15 @@ export class App {
 						return;
 					}
 
-					if (holdPlace.currentPlayId) {
+					const isEndedPlayPendingSync =
+						holdPlace.currentPlayId === this.endedPlayIdPendingSync;
+					if (holdPlace.currentPlayId && !isEndedPlayPendingSync) {
+						this.endedPlayIdPendingSync = null;
 						this.navigateToPlay(watchHoldId);
 						return;
+					}
+					if (!holdPlace.currentPlayId) {
+						this.endedPlayIdPendingSync = null;
 					}
 
 					const baseSelectedPlace =
@@ -1257,7 +1265,9 @@ export class App {
 						selectedPlace: baseSelectedPlace
 							? { ...baseSelectedPlace, currentHoldPlaceId: watchHoldId }
 							: null,
-						selectedHoldPlace: holdPlace,
+						selectedHoldPlace: isEndedPlayPendingSync
+							? { ...holdPlace, currentPlayId: undefined }
+							: holdPlace,
 						selectedHoldPlaceLoading: false,
 						selectedHoldPlaceError: null,
 					};
@@ -1474,6 +1484,11 @@ export class App {
 		try {
 			const response = await endHoldPlacePlay(this.client, holdPlaceId);
 			this.showToast("Playを終了しました。", "success");
+			this.endedPlayIdPendingSync =
+				response.data.playId ??
+				this.playLaunchState.launch?.playId ??
+				this.placeState.selectedHoldPlace?.currentPlayId ??
+				null;
 			if (this.playLaunchState.holdPlaceId === holdPlaceId) {
 				this.playLaunchState = {
 					...this.playLaunchState,
