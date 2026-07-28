@@ -1245,7 +1245,7 @@ export class App {
 						return;
 					}
 
-					// A restarted listener can briefly report stale cache data, so retain this ID until another Play starts.
+					// 監視の再開直後はキャッシュの古い値が返ることがあるため、別のPlayが始まるまで終了済みPlayのIDを保持する。
 					const isLastEndedPlay = holdPlace.currentPlayId === this.lastEndedPlayId;
 					if (holdPlace.currentPlayId && !isLastEndedPlay) {
 						this.lastEndedPlayId = null;
@@ -1443,7 +1443,7 @@ export class App {
 			this.showToast("ゲームを開始しました。", "success");
 			const joinPath = response.data.joinPath;
 			if (joinPath) {
-				this.navigateToPlay(holdPlaceId);
+				this.navigateToPlay(holdPlaceId, joinPath);
 			}
 		} catch (err) {
 			const message = err instanceof Error ? err.message : "ゲーム開始に失敗しました。";
@@ -1460,10 +1460,13 @@ export class App {
 		}
 	}
 
-	navigateToPlay(holdPlaceId: string) {
+	navigateToPlay(
+		holdPlaceId: string,
+		joinPath = `/play/${encodeURIComponent(holdPlaceId)}`,
+	) {
 		const route = utils.parseRoute();
 		if (route.name === "play" && route.holdPlaceId === holdPlaceId) return;
-		utils.navigateTo(`/play/${encodeURIComponent(holdPlaceId)}`);
+		utils.navigateTo(joinPath);
 	}
 
 	async handleEndHoldPlacePlay(holdPlaceId: string) {
