@@ -95,6 +95,7 @@ export class App {
 	placeWatchId: string | null;
 	holdPlaceWatchUnsub: (() => void) | null;
 	holdPlaceWatchId: string | null;
+	lastEndedPlayId: string | null;
 	topPointerState: TopPointerState;
 
 	constructor(config: AppConfig = appConfig as AppConfig) {
@@ -167,6 +168,7 @@ export class App {
 		this.placeWatchId = null;
 		this.holdPlaceWatchUnsub = null;
 		this.holdPlaceWatchId = null;
+		this.lastEndedPlayId = null;
 		this.topPointerState = {
 			pointerId: null,
 			startClientX: 0,
@@ -932,9 +934,6 @@ export class App {
 							${expireText ? `<div class="small text-muted mb-2">このPlayは ${utils.escapeHtml(expireText)} まで遊べます。</div>` : ""}
 							<div class="small text-break mb-2">${utils.escapeHtml(joinUrl)}</div>
 							<div class="d-flex flex-wrap gap-2">
-								<button id="place-open-play-button" class="btn btn-primary btn-sm" data-url="${utils.escapeHtml(
-									joinUrl,
-								)}" type="button">ゲームを開く</button>
 								<button id="place-copy-play-button" class="btn btn-outline-secondary btn-sm" data-url="${utils.escapeHtml(
 									joinUrl,
 								)}" type="button">URLをコピー</button>
@@ -953,7 +952,6 @@ export class App {
 				} else if (isSelfHolding) {
 					playMarkup = `
 						<div class="mt-3 p-3 border rounded-3 bg-light">
-							<div class="small text-muted mb-1">選択中のゲーム</div>
 							<div class="fw-semibold mb-1">${utils.escapeHtml(fixedGameTitle)}</div>
 							${fixedGameDescriptionMarkup}
 							<button id="place-start-play-button" class="btn btn-primary btn-sm" data-place-id="${utils.escapeHtml(
@@ -1247,6 +1245,14 @@ export class App {
 						return;
 					}
 
+					// 監視の再開直後はキャッシュの古い値が返ることがあるため、別のPlayが始まるまで終了済みPlayのIDを保持する。
+					const isLastEndedPlay = holdPlace.currentPlayId === this.lastEndedPlayId;
+					if (holdPlace.currentPlayId && !isLastEndedPlay) {
+						this.lastEndedPlayId = null;
+						this.navigateToPlay(watchHoldId);
+						return;
+					}
+
 					const baseSelectedPlace =
 						this.placeState.selectedPlace?.id === watchPlaceId
 							? this.placeState.selectedPlace
@@ -1256,7 +1262,9 @@ export class App {
 						selectedPlace: baseSelectedPlace
 							? { ...baseSelectedPlace, currentHoldPlaceId: watchHoldId }
 							: null,
-						selectedHoldPlace: holdPlace,
+						selectedHoldPlace: isLastEndedPlay
+							? { ...holdPlace, currentPlayId: undefined }
+							: holdPlace,
 						selectedHoldPlaceLoading: false,
 						selectedHoldPlaceError: null,
 					};
@@ -1435,7 +1443,7 @@ export class App {
 			this.showToast("ゲームを開始しました。", "success");
 			const joinPath = response.data.joinPath;
 			if (joinPath) {
-				utils.navigateTo(joinPath);
+				this.navigateToPlay(holdPlaceId, joinPath);
 			}
 		} catch (err) {
 			const message = err instanceof Error ? err.message : "ゲーム開始に失敗しました。";
@@ -1450,6 +1458,15 @@ export class App {
 				this.render();
 			}
 		}
+	}
+
+	navigateToPlay(
+		holdPlaceId: string,
+		joinPath = `/play/${encodeURIComponent(holdPlaceId)}`,
+	) {
+		const route = utils.parseRoute();
+		if (route.name === "play" && route.holdPlaceId === holdPlaceId) return;
+		utils.navigateTo(joinPath);
 	}
 
 	async handleEndHoldPlacePlay(holdPlaceId: string) {
@@ -1467,6 +1484,11 @@ export class App {
 		try {
 			const response = await endHoldPlacePlay(this.client, holdPlaceId);
 			this.showToast("Playを終了しました。", "success");
+			this.lastEndedPlayId =
+				response.data.playId ??
+				this.playLaunchState.launch?.playId ??
+				this.placeState.selectedHoldPlace?.currentPlayId ??
+				null;
 			if (this.playLaunchState.holdPlaceId === holdPlaceId) {
 				this.playLaunchState = {
 					...this.playLaunchState,
@@ -1659,15 +1681,6 @@ export class App {
 				const placeId = startPlayButton.dataset.placeId;
 				if (!placeId) return;
 				void this.handleStartPlacePlay(placeId);
-			});
-		}
-
-		const openPlayButton = this.rootEl.querySelector<HTMLButtonElement>("#place-open-play-button");
-		if (openPlayButton) {
-			openPlayButton.addEventListener("click", () => {
-				const url = openPlayButton.dataset.url;
-				if (!url) return;
-				location.href = url;
 			});
 		}
 
