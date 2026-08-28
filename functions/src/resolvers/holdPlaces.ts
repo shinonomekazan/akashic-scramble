@@ -7,6 +7,8 @@ export interface HoldPlacePlayInfo {
 	placeId: string;
 	holdUserId?: string;
 	currentPlayId?: string;
+	akashicPlayId?: string;
+	systemUrl?: string;
 	providerId?: string;
 	contentCode?: string;
 	contentUrl?: string;
@@ -31,6 +33,8 @@ function normalizeHoldPlacePlayInfo(
 		placeId: readHoldPlacePlaceId(holdPlaceId, holdPlaceData),
 		holdUserId: holdPlaceData.holdUserId,
 		currentPlayId: holdPlaceData.currentPlayId,
+		akashicPlayId: playData?.akashicPlayId ?? holdPlaceData.currentPlayId,
+		systemUrl: playData?.systemUrl,
 		providerId: playData?.providerId,
 		contentCode: playData?.contentCode,
 		contentUrl: playData?.contentUrl,
@@ -124,5 +128,11 @@ export async function getExpirableHoldPlacePlayInfo(
 	if (holdPlaceData.expireAt === undefined) return null;
 	if (holdPlaceData.expireAt.toMillis() > input.now.toMillis()) return null;
 
-	return normalizeHoldPlacePlayInfo(holdPlaceSnap.id, holdPlaceData);
+	const currentPlayId = holdPlaceData.currentPlayId;
+	if (!currentPlayId) return normalizeHoldPlacePlayInfo(holdPlaceSnap.id, holdPlaceData);
+	const playSnap = await firestore.collection("plays").doc(currentPlayId).get();
+	if (!playSnap.exists) {
+		throw new fw.types.InternalServerError(`Play with id ${currentPlayId} not found`);
+	}
+	return normalizeHoldPlacePlayInfo(holdPlaceSnap.id, holdPlaceData, playSnap.data() as Partial<Play>);
 }

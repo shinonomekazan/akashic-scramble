@@ -5,8 +5,8 @@ import * as fw from "../fw";
 import * as params from "../params";
 import { Router } from "express";
 import { holdPlace, releaseHoldPlace, setHoldPlacePlay } from "../stores";
-import { getCurrentHoldPlacePlayInfo } from "../resolvers/holdPlaces";
-import { AkashicSystemClient, loadAkashicSystemConfig } from "../services/akashicSystem";
+import { getCurrentHoldPlacePlayInfo, HoldPlacePlayInfo } from "../resolvers/holdPlaces";
+import { AkashicSystemRegistry, loadAkashicSystemSettings } from "../services/akashicSystem";
 import { buildAkashicGameCode, DEFAULT_SCRAMBLE_PLAY_CONTENT, resolvePlayContentInfo } from "../services/playContent";
 
 interface IdParams {
@@ -91,8 +91,8 @@ export class PlacesController extends BaseController {
 			placeId: p.id,
 			holdUserId: verifyResult.uid,
 		});
-		if (endedHoldPlace?.currentPlayId) {
-			await this.stopAkashicPlayIfConfigured(endedHoldPlace.currentPlayId);
+		if (endedHoldPlace?.akashicPlayId) {
+			await this.stopAkashicPlayIfConfigured(endedHoldPlace);
 		}
 		return { result: "ok" };
 	}
@@ -100,7 +100,7 @@ export class PlacesController extends BaseController {
 	async startPlay(context: Context) {
 		const p = context.params as IdParams;
 		const verifyResult = await this.verify(p.authorization);
-		const config = loadAkashicSystemConfig();
+		const settings = loadAkashicSystemSettings();
 		const target = await getCurrentHoldPlacePlayInfo(this.app.firestore, {
 			placeId: p.id,
 			holdUserId: verifyResult.uid,
@@ -121,7 +121,7 @@ export class PlacesController extends BaseController {
 		}
 
 		const content = DEFAULT_SCRAMBLE_PLAY_CONTENT;
-		const system = new AkashicSystemClient(config);
+		const system = await new AkashicSystemRegistry(settings).chooseClientByRunningPlayCount();
 		const gameCode = buildAkashicGameCode(target.holdPlaceId, content.contentCode);
 		const createdPlay = await system.createPlay(gameCode);
 		let storedPlay;
@@ -129,14 +129,18 @@ export class PlacesController extends BaseController {
 			storedPlay = await setHoldPlacePlay(this.app.firestore, {
 				holdPlaceId: target.holdPlaceId,
 				holdUserId: verifyResult.uid,
-				systemPlayId: createdPlay.id,
+				akashicPlayId: createdPlay.id,
+				systemUrl: system.config.apiBaseUrl,
 				providerId: content.providerId,
 				contentCode: content.contentCode,
 				contentUrl: content.contentUrl,
 				ownerUserId: verifyResult.uid,
 			});
 
-			if (storedPlay.currentPlayId !== createdPlay.id) {
+			if (
+				storedPlay.akashicPlayId !== createdPlay.id ||
+				storedPlay.systemUrl !== system.config.apiBaseUrl
+			) {
 				await system.stopPlay(createdPlay.id);
 			}
 		} catch (error) {
@@ -157,10 +161,13 @@ export class PlacesController extends BaseController {
 		};
 	}
 
-	private async stopAkashicPlayIfConfigured(playId: string) {
-		if (!process.env.AKASHIC_SYSTEM_API_KEY) return;
+	private async stopAkashicPlayIfConfigured(
+		playInfo: Pick<HoldPlacePlayInfo, "akashicPlayId" | "systemUrl">,
+	) {
+		if (!process.env.AKASHIC_SYSTEM_API_KEY || !playInfo.akashicPlayId) return;
 		try {
-			await new AkashicSystemClient().stopPlay(playId);
+			const registry = new AkashicSystemRegistry(loadAkashicSystemSettings());
+			await registry.getClientForPlay(playInfo.systemUrl).stopPlay(playInfo.akashicPlayId);
 		} catch (error) {
 			console.warn(error);
 		}
