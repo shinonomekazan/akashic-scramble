@@ -17,6 +17,8 @@ export interface EndedHoldPlaceResult {
 	holdPlaceId: string;
 	placeId?: string;
 	currentPlayId?: string;
+	akashicPlayId?: string;
+	systemUrl?: string;
 }
 
 // PlaceBehaviour から holdableTime バリアントを絞り込むための型ガード
@@ -85,6 +87,7 @@ async function endHoldPlaceTransaction(
 	if (input.requireSameCurrentPlayId && currentPlayId !== input.expectedCurrentPlayId) return null;
 	const playRef = currentPlayId ? firestore.collection("plays").doc(currentPlayId) : undefined;
 	const playSnap = playRef ? await transaction.get(playRef) : undefined;
+	const playData = playSnap?.exists ? (playSnap.data() as Partial<Play>) : undefined;
 	if (placeId != undefined) {
 		const placeRef = firestore.collection("places").doc(placeId);
 		const placeSnap = await transaction.get(placeRef);
@@ -119,6 +122,8 @@ async function endHoldPlaceTransaction(
 		holdPlaceId: holdPlaceRef.id,
 		placeId,
 		currentPlayId,
+		akashicPlayId: playData?.akashicPlayId ?? currentPlayId,
+		systemUrl: playData?.systemUrl,
 	};
 }
 
@@ -139,6 +144,8 @@ function normalizeHoldPlacePlayInfo(
 		placeId: readHoldPlacePlaceId(holdPlaceId, holdPlaceData),
 		holdUserId: holdPlaceData.holdUserId,
 		currentPlayId: holdPlaceData.currentPlayId,
+		akashicPlayId: playData?.akashicPlayId ?? holdPlaceData.currentPlayId,
+		systemUrl: playData?.systemUrl,
 		providerId: playData?.providerId,
 		contentCode: playData?.contentCode,
 		contentUrl: playData?.contentUrl,
@@ -296,13 +303,15 @@ export function setHoldPlacePlay(
 	input: {
 		holdPlaceId: string;
 		holdUserId?: string;
-		systemPlayId: string;
+		akashicPlayId: string;
+		systemUrl: string;
 		providerId: string;
 		contentCode: string;
 		contentUrl: string;
 		ownerUserId: string;
 	},
 ) {
+	const playRef = firestore.collection("plays").doc();
 	return firestore.runTransaction(async (transaction) => {
 		const holdPlaceRef = firestore.collection("holdPlaces").doc(input.holdPlaceId);
 		const holdPlaceSnap = await transaction.get(holdPlaceRef);
@@ -330,6 +339,8 @@ export function setHoldPlacePlay(
 		const now = Timestamp.now();
 		const behaviours = Array.isArray(holdPlaceData.behaviours) ? holdPlaceData.behaviours : [];
 		const play: Play = {
+			akashicPlayId: input.akashicPlayId,
+			systemUrl: input.systemUrl,
 			placeId: readHoldPlacePlaceId(holdPlaceRef.id, holdPlaceData),
 			holdPlaceId: holdPlaceRef.id,
 			providerId: input.providerId,
@@ -344,10 +355,10 @@ export function setHoldPlacePlay(
 			updatedAt: now,
 		};
 		const nextHoldPlaceData = {
-			currentPlayId: input.systemPlayId,
+			currentPlayId: playRef.id,
 			updatedAt: now,
 		};
-		await transaction.set(firestore.collection("plays").doc(input.systemPlayId), eraseUndefined(play));
+		await transaction.set(playRef, eraseUndefined(play));
 		await transaction.update(holdPlaceRef, nextHoldPlaceData);
 
 		return normalizeHoldPlacePlayInfo(

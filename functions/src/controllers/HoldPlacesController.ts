@@ -5,8 +5,12 @@ import * as fw from "../fw";
 import * as params from "../params";
 import { Router } from "express";
 import { clearHoldPlacePlay } from "../stores";
-import { getHoldPlacePlayInfo } from "../resolvers/holdPlaces";
-import { AkashicExecutionMode, AkashicSystemClient, loadAkashicSystemConfig } from "../services/akashicSystem";
+import { getHoldPlacePlayInfo, HoldPlacePlayInfo } from "../resolvers/holdPlaces";
+import {
+	AkashicExecutionMode,
+	AkashicSystemRegistry,
+	loadAkashicSystemSettings,
+} from "../services/akashicSystem";
 import { resolvePlayContentInfo } from "../services/playContent";
 
 interface IdParams {
@@ -63,16 +67,20 @@ export class HoldPlacesController extends BaseController {
 		const playInfo = await getHoldPlacePlayInfo(this.app.firestore, {
 			holdPlaceId: p.id,
 		});
-		const config = loadAkashicSystemConfig();
+		const settings = loadAkashicSystemSettings();
 		const mode: AkashicExecutionMode = playInfo.ownerUserId === verifyResult.uid ? "active" : "passive";
 		const userId = `scramble-${verifyResult.uid}`;
-		const token = await new AkashicSystemClient(config).createToken(playInfo.currentPlayId!, userId, mode);
+		const system = new AkashicSystemRegistry(settings).getClientForPlay(playInfo.systemUrl);
+		const token = await system.createToken(playInfo.akashicPlayId!, userId, mode);
 		const content = await resolvePlayContentInfo(playInfo);
 
 		return {
 			holdPlaceId: playInfo.holdPlaceId,
 			placeId: playInfo.placeId,
-			playId: playInfo.currentPlayId,
+			// 従来クライアントとの互換性のため、playIdはAkashic Play IDのまま維持する。
+			playId: playInfo.akashicPlayId,
+			scramblePlayId: playInfo.currentPlayId,
+			akashicPlayId: playInfo.akashicPlayId,
 			mode,
 			userId,
 			gameTitle: content.title,
@@ -81,7 +89,7 @@ export class HoldPlacesController extends BaseController {
 			expireAt: playInfo.expireAt?.toDate().toISOString(),
 			playToken: token.value,
 			playlogServerUrl: token.url,
-			gamePageUrl: config.gamePageUrl,
+			gamePageUrl: settings.gamePageUrl,
 		};
 	}
 
@@ -93,8 +101,8 @@ export class HoldPlacesController extends BaseController {
 			holdUserId: verifyResult.uid,
 			requireOwner: true,
 		});
-		if (playInfo.currentPlayId) {
-			await this.stopAkashicPlayIfConfigured(playInfo.currentPlayId);
+		if (playInfo.akashicPlayId) {
+			await this.stopAkashicPlayIfConfigured(playInfo);
 		}
 		return {
 			result: "ok",
@@ -104,10 +112,13 @@ export class HoldPlacesController extends BaseController {
 		};
 	}
 
-	private async stopAkashicPlayIfConfigured(playId: string) {
-		if (!process.env.AKASHIC_SYSTEM_API_KEY) return;
+	private async stopAkashicPlayIfConfigured(
+		playInfo: Pick<HoldPlacePlayInfo, "akashicPlayId" | "systemUrl">,
+	) {
+		if (!process.env.AKASHIC_SYSTEM_API_KEY || !playInfo.akashicPlayId) return;
 		try {
-			await new AkashicSystemClient().stopPlay(playId);
+			const registry = new AkashicSystemRegistry(loadAkashicSystemSettings());
+			await registry.getClientForPlay(playInfo.systemUrl).stopPlay(playInfo.akashicPlayId);
 		} catch (error) {
 			console.warn(error);
 		}
