@@ -63,7 +63,7 @@ PlaceのcurrentHoldPlaceIdを参照する。
 2. HoldPlaceのcurrentPlayIdに値を入れる
 3. currentPlayIdにはScramble側Play IDを入れ、Akashic Play IDを入れない
 
-既存データとの互換性のため、akashicPlayIdが無いPlayはドキュメントIDをAkashic Play IDとして扱い、systemUrlが無いPlayはlegacy用Akashic System URLへ接続する。
+既存データの引き継ぎは行わない。Akashic Systemへのアクセスには、Playに保存したakashicPlayIdとsystemUrlを使用する。
 
 ### Playに参加する
 

@@ -20,7 +20,6 @@ export interface AkashicSystemConfig {
 
 export interface AkashicSystemSettings {
 	systems: AkashicSystemConfig[];
-	legacySystem: AkashicSystemConfig;
 	gamePageUrl: string;
 }
 
@@ -44,10 +43,8 @@ interface ApiResponse<T> {
 
 interface AkashicPlayList {
 	values: AkashicPlay[];
-	totalCount?: number;
+	totalCount?: number | string;
 }
-
-const DEFAULT_LEGACY_API_BASE_URL = "https://akashic-system.shinonomekazan.com/api";
 
 const browserActivePermission: AkashicPermission = {
 	writeTick: true,
@@ -82,17 +79,16 @@ export function loadAkashicSystemSettings(): AkashicSystemSettings {
 		throw new fw.types.ServiceUnavailableError("Akashic System is not configured.");
 	}
 
-	const legacyApiBaseUrl = normalizeApiBaseUrl(
-		process.env.AKASHIC_SYSTEM_API_BASE_URL ?? DEFAULT_LEGACY_API_BASE_URL,
-	);
 	const configuredSystemUrls = process.env.AKASHIC_SYSTEM_API_BASE_URLS?.split(",")
 		.map((value) => value.trim())
 		.filter((value) => value.length > 0);
-	const systemUrls = configuredSystemUrls?.length ? configuredSystemUrls : [legacyApiBaseUrl];
+	if (!configuredSystemUrls?.length) {
+		throw new fw.types.ServiceUnavailableError("Akashic System URLs are not configured.");
+	}
+	const systemUrls = configuredSystemUrls;
 	const uniqueSystemUrls = [...new Set(systemUrls.map(normalizeApiBaseUrl))];
 	return {
 		systems: uniqueSystemUrls.map((apiBaseUrl) => ({ apiBaseUrl, apiKey })),
-		legacySystem: { apiBaseUrl: legacyApiBaseUrl, apiKey },
 		gamePageUrl:
 			process.env.AKASHIC_SYSTEM_GAME_PAGE_URL ??
 			"https://akashic-system.shinonomekazan.com/contents/index.html",
@@ -159,10 +155,15 @@ export class AkashicSystemClient {
 			"GET",
 			"/v1.0/plays?status%5B%5D=running&_limit=1&_count=1",
 		);
-		if (typeof result.totalCount !== "number" || !Number.isFinite(result.totalCount)) {
+		// 実環境ではtotalCountが数字の文字列で返るため、数値型と併せて扱う。
+		const count =
+			typeof result.totalCount === "string" && /^\d+$/.test(result.totalCount)
+				? Number(result.totalCount)
+				: result.totalCount;
+		if (typeof count !== "number" || !Number.isSafeInteger(count) || count < 0) {
 			throw new Error("Akashic System did not return a running Play count.");
 		}
-		return result.totalCount;
+		return count;
 	}
 
 	createToken(playId: string, userId: string, mode: AkashicExecutionMode) {
@@ -188,18 +189,16 @@ export class AkashicSystemClient {
 export class AkashicSystemRegistry {
 	private readonly selectableClients: AkashicSystemClient[];
 	private readonly clientsByUrl: Map<string, AkashicSystemClient>;
-	private readonly legacyClient: AkashicSystemClient;
 
 	constructor(settings: AkashicSystemSettings) {
 		this.selectableClients = settings.systems.map((config) => new AkashicSystemClient(config));
-		this.legacyClient = new AkashicSystemClient(settings.legacySystem);
 		this.clientsByUrl = new Map(
-			[...this.selectableClients, this.legacyClient].map((client) => [client.config.apiBaseUrl, client]),
+			this.selectableClients.map((client) => [client.config.apiBaseUrl, client]),
 		);
 	}
 
 	findBySystemUrl(systemUrl?: string) {
-		if (!systemUrl) return this.legacyClient;
+		if (!systemUrl) return undefined;
 		return this.clientsByUrl.get(normalizeApiBaseUrl(systemUrl));
 	}
 

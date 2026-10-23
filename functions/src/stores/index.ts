@@ -122,7 +122,7 @@ async function endHoldPlaceTransaction(
 		holdPlaceId: holdPlaceRef.id,
 		placeId,
 		currentPlayId,
-		akashicPlayId: playData?.akashicPlayId ?? currentPlayId,
+		akashicPlayId: playData?.akashicPlayId,
 		systemUrl: playData?.systemUrl,
 	};
 }
@@ -144,7 +144,7 @@ function normalizeHoldPlacePlayInfo(
 		placeId: readHoldPlacePlaceId(holdPlaceId, holdPlaceData),
 		holdUserId: holdPlaceData.holdUserId,
 		currentPlayId: holdPlaceData.currentPlayId,
-		akashicPlayId: playData?.akashicPlayId ?? holdPlaceData.currentPlayId,
+		akashicPlayId: playData?.akashicPlayId,
 		systemUrl: playData?.systemUrl,
 		providerId: playData?.providerId,
 		contentCode: playData?.contentCode,

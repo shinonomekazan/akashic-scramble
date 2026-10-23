@@ -137,6 +137,7 @@ export class PlacesController extends BaseController {
 				ownerUserId: verifyResult.uid,
 			});
 
+			// 同時開始で別のPlayが採用された場合、自分が作成した未採用のPlayを残さない。
 			if (
 				storedPlay.akashicPlayId !== createdPlay.id ||
 				storedPlay.systemUrl !== system.config.apiBaseUrl
@@ -144,6 +145,7 @@ export class PlacesController extends BaseController {
 				await system.stopPlay(createdPlay.id);
 			}
 		} catch (error) {
+			// Firestoreへの登録に失敗した場合も、先に作成した外部Playを補償的に停止する。
 			await system.stopPlay(createdPlay.id);
 			throw error;
 		}

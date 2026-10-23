@@ -47,9 +47,8 @@ function processRequest(app: App, apiKey: string | undefined, request: Request, 
 	return app.app(request, response);
 }
 
-async function stopAkashicPlayIfNeeded(playInfo: HoldPlacePlayInfo) {
+async function stopAkashicPlayIfNeeded(playInfo: HoldPlacePlayInfo, registry: AkashicSystemRegistry) {
 	if (!playInfo.akashicPlayId) return;
-	const registry = new AkashicSystemRegistry(loadAkashicSystemSettings());
 	const system = registry.getClientForPlay(playInfo.systemUrl);
 	const play = await system.getPlay(playInfo.akashicPlayId);
 	if (shouldStopAkashicPlay(play.status)) {
@@ -87,6 +86,8 @@ export const expireHoldPlaces = onSchedule({ region: "asia-northeast1", schedule
 
 	if (snapshot.empty) return;
 
+	// Playのない確保は、Akashic Systemが未設定でも解放できるよう遅延初期化する。
+	let registry: AkashicSystemRegistry | undefined;
 	for (const doc of snapshot.docs) {
 		try {
 			const playInfo = await getExpirableHoldPlacePlayInfo(firestore, {
@@ -95,8 +96,9 @@ export const expireHoldPlaces = onSchedule({ region: "asia-northeast1", schedule
 			});
 			if (!playInfo) continue;
 
-			if (playInfo.currentPlayId) {
-				await stopAkashicPlayIfNeeded(playInfo);
+			if (playInfo.akashicPlayId) {
+				registry ??= new AkashicSystemRegistry(loadAkashicSystemSettings());
+				await stopAkashicPlayIfNeeded(playInfo, registry);
 			}
 
 			await expireHoldPlace(firestore, {

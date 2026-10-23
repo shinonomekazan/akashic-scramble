@@ -33,7 +33,7 @@ function normalizeHoldPlacePlayInfo(
 		placeId: readHoldPlacePlaceId(holdPlaceId, holdPlaceData),
 		holdUserId: holdPlaceData.holdUserId,
 		currentPlayId: holdPlaceData.currentPlayId,
-		akashicPlayId: playData?.akashicPlayId ?? holdPlaceData.currentPlayId,
+		akashicPlayId: playData?.akashicPlayId,
 		systemUrl: playData?.systemUrl,
 		providerId: playData?.providerId,
 		contentCode: playData?.contentCode,
@@ -132,7 +132,8 @@ export async function getExpirableHoldPlacePlayInfo(
 	if (!currentPlayId) return normalizeHoldPlacePlayInfo(holdPlaceSnap.id, holdPlaceData);
 	const playSnap = await firestore.collection("plays").doc(currentPlayId).get();
 	if (!playSnap.exists) {
-		throw new fw.types.InternalServerError(`Play with id ${currentPlayId} not found`);
+		console.warn(`Play with id ${currentPlayId} not found while expiring HoldPlace ${holdPlaceSnap.id}`);
+		return normalizeHoldPlacePlayInfo(holdPlaceSnap.id, holdPlaceData);
 	}
 	return normalizeHoldPlacePlayInfo(holdPlaceSnap.id, holdPlaceData, playSnap.data() as Partial<Play>);
 }
