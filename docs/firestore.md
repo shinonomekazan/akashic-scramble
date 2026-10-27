@@ -63,8 +63,6 @@ PlaceのcurrentHoldPlaceIdを参照する。
 2. HoldPlaceのcurrentPlayIdに値を入れる
 3. currentPlayIdにはScramble側Play IDを入れ、Akashic Play IDを入れない
 
-既存データの引き継ぎは行わない。Akashic Systemへのアクセスには、Playに保存したakashicPlayIdとsystemUrlを使用する。
-
 ### Playに参加する
 
 1. ユーザーのログイン状態と、PlayのownerUserId、PlayのdefaultPermissionを元にPlayTokenを作成

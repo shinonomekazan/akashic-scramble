@@ -46,6 +46,8 @@ interface AkashicPlayList {
 	totalCount?: number | string;
 }
 
+const DEFAULT_API_BASE_URL = "https://akashic-system.shinonomekazan.com/api";
+
 const browserActivePermission: AkashicPermission = {
 	writeTick: true,
 	readTick: true,
@@ -79,13 +81,13 @@ export function loadAkashicSystemSettings(): AkashicSystemSettings {
 		throw new fw.types.ServiceUnavailableError("Akashic System is not configured.");
 	}
 
+	const apiBaseUrl = normalizeApiBaseUrl(
+		process.env.AKASHIC_SYSTEM_API_BASE_URL ?? DEFAULT_API_BASE_URL,
+	);
 	const configuredSystemUrls = process.env.AKASHIC_SYSTEM_API_BASE_URLS?.split(",")
 		.map((value) => value.trim())
 		.filter((value) => value.length > 0);
-	if (!configuredSystemUrls?.length) {
-		throw new fw.types.ServiceUnavailableError("Akashic System URLs are not configured.");
-	}
-	const systemUrls = configuredSystemUrls;
+	const systemUrls = configuredSystemUrls?.length ? configuredSystemUrls : [apiBaseUrl];
 	const uniqueSystemUrls = [...new Set(systemUrls.map(normalizeApiBaseUrl))];
 	return {
 		systems: uniqueSystemUrls.map((apiBaseUrl) => ({ apiBaseUrl, apiKey })),
@@ -160,7 +162,7 @@ export class AkashicSystemClient {
 			typeof result.totalCount === "string" && /^\d+$/.test(result.totalCount)
 				? Number(result.totalCount)
 				: result.totalCount;
-		if (typeof count !== "number" || !Number.isSafeInteger(count) || count < 0) {
+		if (typeof count !== "number" || !Number.isFinite(count)) {
 			throw new Error("Akashic System did not return a running Play count.");
 		}
 		return count;

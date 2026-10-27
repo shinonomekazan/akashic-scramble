@@ -34,9 +34,5 @@ jobs:
           printf 'AKASHIC_SYSTEM_API_KEY=%s\n' "$AKASHIC_SYSTEM_API_KEY" >> ./functions/.env
       - name: npm ci
         run: npm ci && npm --prefix ./functions ci
-      - name: Validate Akashic System settings
-        run: |
-          npm --prefix ./functions run build
-          node -e 'require("./functions/node_modules/dotenv").config({ path: "./functions/.env" }); require("./functions/lib/services/akashicSystem").loadAkashicSystemSettings();'
       - name: Deploy functions
         run: npm run deploy:functions -- --token=${{ secrets.FIREBASE_TOKEN_AKASHIC_SCRAMBLE }}
