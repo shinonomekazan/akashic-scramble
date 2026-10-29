@@ -4,10 +4,20 @@ import * as validators from "express-validator";
 import * as fw from "../fw";
 import * as params from "../params";
 import { Router } from "express";
-import { holdPlace, releaseHoldPlace, setHoldPlacePlay } from "../stores";
+import { holdPlace, releaseHoldPlace, releasePlaySlot, reservePlaySlot, setHoldPlacePlay } from "../stores";
 import { getCurrentHoldPlacePlayInfo, HoldPlacePlayInfo } from "../resolvers/holdPlaces";
 import { AkashicSystemRegistry, loadAkashicSystemSettings } from "../services/akashicSystem";
 import { buildAkashicGameCode, DEFAULT_SCRAMBLE_PLAY_CONTENT, resolvePlayContentInfo } from "../services/playContent";
+
+// 未設定の場合は上限なしとし、枠の数だけを数える。
+function loadPlayLimit() {
+	const value = process.env.SCRAMBLE_PLAY_LIMIT?.trim();
+	if (!value) return undefined;
+	if (!/^\d+$/.test(value)) {
+		throw new fw.types.InternalServerError("SCRAMBLE_PLAY_LIMIT is invalid.");
+	}
+	return Number(value);
+}
 
 interface IdParams {
 	authorization: string;
@@ -121,32 +131,47 @@ export class PlacesController extends BaseController {
 		}
 
 		const content = DEFAULT_SCRAMBLE_PLAY_CONTENT;
-		const system = await new AkashicSystemRegistry(settings).chooseClientByRunningPlayCount();
-		const gameCode = buildAkashicGameCode(target.holdPlaceId, content.contentCode);
-		const createdPlay = await system.createPlay(gameCode);
+		// 外部Playを作る前に枠を確保し、同時開始でも上限を超えないようにする。
+		const reserved = await reservePlaySlot(this.app.firestore, {
+			holdPlaceId: target.holdPlaceId,
+			holdUserId: verifyResult.uid,
+			limit: loadPlayLimit(),
+		});
 		let storedPlay;
 		try {
-			storedPlay = await setHoldPlacePlay(this.app.firestore, {
-				holdPlaceId: target.holdPlaceId,
-				holdUserId: verifyResult.uid,
-				akashicPlayId: createdPlay.id,
-				systemUrl: system.config.apiBaseUrl,
-				providerId: content.providerId,
-				contentCode: content.contentCode,
-				contentUrl: content.contentUrl,
-				ownerUserId: verifyResult.uid,
-			});
+			const system = await new AkashicSystemRegistry(settings).chooseClientByRunningPlayCount();
+			const gameCode = buildAkashicGameCode(target.holdPlaceId, content.contentCode);
+			const createdPlay = await system.createPlay(gameCode);
+			try {
+				storedPlay = await setHoldPlacePlay(this.app.firestore, {
+					holdPlaceId: target.holdPlaceId,
+					holdUserId: verifyResult.uid,
+					akashicPlayId: createdPlay.id,
+					systemUrl: system.config.apiBaseUrl,
+					providerId: content.providerId,
+					contentCode: content.contentCode,
+					contentUrl: content.contentUrl,
+					ownerUserId: verifyResult.uid,
+				});
 
-			// 同時開始で別のPlayが採用された場合、自分が作成した未採用のPlayを残さない。
-			if (
-				storedPlay.akashicPlayId !== createdPlay.id ||
-				storedPlay.systemUrl !== system.config.apiBaseUrl
-			) {
+				// 同時開始で別のPlayが採用された場合、自分が作成した未採用のPlayを残さない。
+				if (storedPlay.akashicPlayId !== createdPlay.id || storedPlay.systemUrl !== system.config.apiBaseUrl) {
+					await system.stopPlay(createdPlay.id);
+				}
+			} catch (error) {
+				// Firestoreへの登録に失敗した場合も、先に作成した外部Playを補償的に停止する。
 				await system.stopPlay(createdPlay.id);
+				throw error;
 			}
 		} catch (error) {
-			// Firestoreへの登録に失敗した場合も、先に作成した外部Playを補償的に停止する。
-			await system.stopPlay(createdPlay.id);
+			// Playを登録できなかった場合、自分が確保した枠を解放する。
+			if (reserved) {
+				try {
+					await releasePlaySlot(this.app.firestore, { holdPlaceId: target.holdPlaceId });
+				} catch (releaseError) {
+					console.warn(releaseError);
+				}
+			}
 			throw error;
 		}
 
@@ -163,9 +188,7 @@ export class PlacesController extends BaseController {
 		};
 	}
 
-	private async stopAkashicPlayIfConfigured(
-		playInfo: Pick<HoldPlacePlayInfo, "akashicPlayId" | "systemUrl">,
-	) {
+	private async stopAkashicPlayIfConfigured(playInfo: Pick<HoldPlacePlayInfo, "akashicPlayId" | "systemUrl">) {
 		if (!process.env.AKASHIC_SYSTEM_API_KEY || !playInfo.akashicPlayId) return;
 		try {
 			const registry = new AkashicSystemRegistry(loadAkashicSystemSettings());

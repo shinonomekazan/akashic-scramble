@@ -91,6 +91,12 @@ export interface HoldPlace {
 	currentPlayId?: string;
 
 	/**
+	 * そのHoldPlaceがScrambleの同時プレイ数の枠を確保しているかどうか。
+	 * Playの作成前に確保し、Playの終了やHoldPlaceの終了で解放する。
+	 */
+	playSlotReserved?: boolean;
+
+	/**
 	 * HoldPlaceの有効期限。
 	 * Timestamp型だが、分が最小単位であることが保証される。
 	 * この値が存在しない場合、無期限か、時限以外の権利で保有されることを意味する。
@@ -180,6 +186,18 @@ export interface Play {
 	expireAt?: Timestamp;
 
 	createdAt: Timestamp;
+
+	updatedAt: Timestamp;
+}
+
+/**
+ * Scrambleが起動中のPlay数。counters/playsに1件だけ存在する。
+ */
+export interface PlayCounter {
+	/**
+	 * 枠を確保しているHoldPlaceの数。
+	 */
+	count: number;
 
 	updatedAt: Timestamp;
 }
