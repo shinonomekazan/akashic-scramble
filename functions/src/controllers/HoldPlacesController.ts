@@ -77,8 +77,7 @@ export class HoldPlacesController extends BaseController {
 		return {
 			holdPlaceId: playInfo.holdPlaceId,
 			placeId: playInfo.placeId,
-			// 従来クライアントとの互換性のため、playIdはAkashic Play IDのまま維持する。
-			playId: playInfo.akashicPlayId,
+			playId: playInfo.currentPlayId,
 			scramblePlayId: playInfo.currentPlayId,
 			akashicPlayId: playInfo.akashicPlayId,
 			mode,
