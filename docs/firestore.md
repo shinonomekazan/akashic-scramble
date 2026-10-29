@@ -21,7 +21,7 @@ holdPlaces/
 	{holdPlaceId}
 
 plays/
-	{playId}
+	{scramblePlayId}
 		playTokens/
 			{playTokenId}
 
@@ -31,6 +31,8 @@ plays/
 	- 唯一、currentHoldPlaceIdのみが更新される
 2. PlaceからHoldPlaceが生成され、一つの確保された枠を表現する
 3. HoldPlaceからPlayが生成され、一つのプレイを表現する
+	- PlayドキュメントIDはScramble側で発行し、Akashic System側のIDとは分離する
+	- Akashic System側のIDはakashicPlayId、作成先API URLはsystemUrlに保存する
 4. PlayからPlayTokenが生成され、ユーザーのプレイ権を表現する
 
 子コレクションは現状ほぼ利用していない。ほぼ、単一フィールドインデックスで用途を網羅できそうなため。以下に代表的な検索方法を例示する。
@@ -59,6 +61,7 @@ PlaceのcurrentHoldPlaceIdを参照する。
 
 1. HoldPlaceのbehavioursに応じてPlayを生成
 2. HoldPlaceのcurrentPlayIdに値を入れる
+3. currentPlayIdにはScramble側Play IDを入れ、Akashic Play IDを入れない
 
 ### Playに参加する
 

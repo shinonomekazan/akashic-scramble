@@ -112,6 +112,16 @@ export type PlayState = "playing" | "ended";
 
 export interface Play {
 	/**
+	 * Scrambleとは別にAkashic System側で発行されたPlayのID。
+	 */
+	akashicPlayId: string;
+
+	/**
+	 * Akashic Playを作成したAkashic System APIのベースURL。
+	 */
+	systemUrl: string;
+
+	/**
 	 * そのPlayが実行されているPlaceのID。
 	 */
 	placeId: string;

@@ -26,6 +26,8 @@ export interface LaunchHoldPlacePlayResult {
 	holdPlaceId: string;
 	placeId: string;
 	playId: string;
+	scramblePlayId?: string;
+	akashicPlayId?: string;
 	mode: "active" | "passive";
 	userId: string;
 	gameTitle: string;

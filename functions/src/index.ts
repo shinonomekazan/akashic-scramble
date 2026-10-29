@@ -9,8 +9,8 @@ import { AppConfig, Config } from "./config";
 import * as fw from "./fw";
 import { register } from "./register";
 import { expireHoldPlace } from "./stores";
-import { getExpirableHoldPlacePlayInfo } from "./resolvers/holdPlaces";
-import { AkashicSystemClient } from "./services/akashicSystem";
+import { getExpirableHoldPlacePlayInfo, HoldPlacePlayInfo } from "./resolvers/holdPlaces";
+import { AkashicSystemRegistry, loadAkashicSystemSettings } from "./services/akashicSystem";
 
 let app: App | undefined = undefined;
 let firebaseApp: FirebaseApp | undefined = undefined;
@@ -47,16 +47,17 @@ function processRequest(app: App, apiKey: string | undefined, request: Request, 
 	return app.app(request, response);
 }
 
-function shouldStopAkashicPlay(status: string) {
-	return status === "preparing" || status === "running";
+async function stopAkashicPlayIfNeeded(playInfo: HoldPlacePlayInfo, registry: AkashicSystemRegistry) {
+	if (!playInfo.akashicPlayId) return;
+	const system = registry.getClientForPlay(playInfo.systemUrl);
+	const play = await system.getPlay(playInfo.akashicPlayId);
+	if (shouldStopAkashicPlay(play.status)) {
+		await system.stopPlay(playInfo.akashicPlayId);
+	}
 }
 
-async function stopAkashicPlayIfNeeded(playId: string) {
-	const system = new AkashicSystemClient();
-	const play = await system.getPlay(playId);
-	if (shouldStopAkashicPlay(play.status)) {
-		await system.stopPlay(playId);
-	}
+function shouldStopAkashicPlay(status: string) {
+	return status === "preparing" || status === "running";
 }
 
 export const api = onRequest({ region: "asia-northeast1" }, (request, response) => {
@@ -85,6 +86,8 @@ export const expireHoldPlaces = onSchedule({ region: "asia-northeast1", schedule
 
 	if (snapshot.empty) return;
 
+	// Playのない確保は、Akashic Systemが未設定でも解放できるよう遅延初期化する。
+	let registry: AkashicSystemRegistry | undefined;
 	for (const doc of snapshot.docs) {
 		try {
 			const playInfo = await getExpirableHoldPlacePlayInfo(firestore, {
@@ -93,8 +96,9 @@ export const expireHoldPlaces = onSchedule({ region: "asia-northeast1", schedule
 			});
 			if (!playInfo) continue;
 
-			if (playInfo.currentPlayId) {
-				await stopAkashicPlayIfNeeded(playInfo.currentPlayId);
+			if (playInfo.akashicPlayId) {
+				registry ??= new AkashicSystemRegistry(loadAkashicSystemSettings());
+				await stopAkashicPlayIfNeeded(playInfo, registry);
 			}
 
 			await expireHoldPlace(firestore, {

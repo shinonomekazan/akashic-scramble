@@ -490,7 +490,7 @@ export class App {
 					<div>
 						<div class="small text-muted">${utils.escapeHtml(modeLabel)}</div>
 						<div class="fw-semibold">${utils.escapeHtml(launch.gameTitle || "Akashic Game")}</div>
-						<div class="small text-muted">Play ID: ${utils.escapeHtml(launch.playId)}</div>
+						<div class="small text-muted">Play ID: ${utils.escapeHtml(launch.scramblePlayId ?? launch.playId)}</div>
 					</div>
 					${
 						launch.mode === "active"
@@ -624,7 +624,7 @@ export class App {
 				type: "akashic-system-launch-config",
 				payload: {
 					mode: launch.mode,
-					playId: launch.playId,
+					playId: launch.akashicPlayId ?? launch.playId,
 					userId: launch.userId,
 					contentUrl: launch.contentUrl,
 					playToken: launch.playToken,
