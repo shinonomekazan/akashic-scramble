@@ -10,6 +10,7 @@ import {
 	PlaceDefaultPermissionBehaviour,
 	PlaceHoldableTimeBehaviour,
 	Play,
+	PlayCounter,
 	PlayPermission,
 } from "../types/firestore";
 
@@ -40,6 +41,29 @@ function resolveHoldExpireAt(behaviours: PlaceBehaviour[], now: Timestamp) {
 	const time = holdableBehaviour.time;
 	if (typeof time !== "number" || !Number.isFinite(time) || time <= 0) return undefined;
 	return Timestamp.fromMillis(now.toMillis() + time);
+}
+
+function playCounterRef(firestore: Firestore) {
+	return firestore.collection("counters").doc("plays");
+}
+
+// HoldPlaceが確保している枠を、同じトランザクション内で解放する。
+function releasePlaySlotInTransaction(
+	firestore: Firestore,
+	transaction: Transaction,
+	holdPlaceData: Partial<HoldPlace>,
+	now: Timestamp,
+) {
+	if (!holdPlaceData.playSlotReserved) return {};
+	transaction.set(
+		playCounterRef(firestore),
+		{
+			count: FieldValue.increment(-1),
+			updatedAt: now,
+		},
+		{ merge: true },
+	);
+	return { playSlotReserved: FieldValue.delete() };
 }
 
 async function endHoldPlaceTransaction(
@@ -109,12 +133,14 @@ async function endHoldPlaceTransaction(
 		});
 	}
 
+	const releasedSlot = releasePlaySlotInTransaction(firestore, transaction, holdPlaceData, now);
 	await transaction.update(
 		holdPlaceRef,
 		eraseUndefined({
 			endedAt: now,
 			expireAt: FieldValue.delete(),
 			updatedAt: now,
+			...releasedSlot,
 		}),
 	);
 
@@ -298,6 +324,83 @@ export function expireHoldPlace(
 	});
 }
 
+/**
+ * Play作成前に、Scrambleの同時プレイ数の枠を確保する。
+ * 既に枠を確保済み、またはPlayがあるHoldPlaceでは確保せずfalseを返す。
+ */
+export function reservePlaySlot(
+	firestore: Firestore,
+	input: {
+		holdPlaceId: string;
+		holdUserId?: string;
+		limit?: number;
+	},
+) {
+	return firestore.runTransaction(async (transaction) => {
+		const holdPlaceRef = firestore.collection("holdPlaces").doc(input.holdPlaceId);
+		const counterRef = playCounterRef(firestore);
+		const holdPlaceSnap = await transaction.get(holdPlaceRef);
+		const counterSnap = await transaction.get(counterRef);
+		if (!holdPlaceSnap.exists) {
+			throw new fw.types.NotFound(`HoldPlace with id ${input.holdPlaceId} not found`);
+		}
+
+		const holdPlaceData = holdPlaceSnap.data() as Partial<HoldPlace>;
+		if (holdPlaceData.endedAt != null) {
+			throw new fw.types.BadRequest("HoldPlace is already ended");
+		}
+		const holdUserId = holdPlaceData.holdUserId;
+		if (holdUserId && holdUserId !== input.holdUserId) {
+			throw new fw.types.Forbidden("HoldPlace is owned by another user");
+		}
+		if (holdPlaceData.currentPlayId || holdPlaceData.playSlotReserved) return false;
+
+		const count = (counterSnap.data() as Partial<PlayCounter> | undefined)?.count ?? 0;
+		if (input.limit != null && count >= input.limit) {
+			throw new fw.types.ServiceUnavailableError("Play limit reached");
+		}
+
+		const now = Timestamp.now();
+		const counter: PlayCounter = {
+			count: count + 1,
+			updatedAt: now,
+		};
+		await transaction.set(counterRef, counter);
+		await transaction.update(holdPlaceRef, {
+			playSlotReserved: true,
+			updatedAt: now,
+		});
+		return true;
+	});
+}
+
+/**
+ * Playの作成に失敗した時、reservePlaySlotで確保した枠を解放する。
+ * Playが登録済みの場合は、Playの終了時に解放するためここでは何もしない。
+ */
+export function releasePlaySlot(
+	firestore: Firestore,
+	input: {
+		holdPlaceId: string;
+	},
+) {
+	return firestore.runTransaction(async (transaction) => {
+		const holdPlaceRef = firestore.collection("holdPlaces").doc(input.holdPlaceId);
+		const holdPlaceSnap = await transaction.get(holdPlaceRef);
+		if (!holdPlaceSnap.exists) return;
+
+		const holdPlaceData = holdPlaceSnap.data() as Partial<HoldPlace>;
+		if (holdPlaceData.currentPlayId) return;
+		const now = Timestamp.now();
+		const releasedSlot = releasePlaySlotInTransaction(firestore, transaction, holdPlaceData, now);
+		if (Object.keys(releasedSlot).length === 0) return;
+		await transaction.update(holdPlaceRef, {
+			updatedAt: now,
+			...releasedSlot,
+		});
+	});
+}
+
 export function setHoldPlacePlay(
 	firestore: Firestore,
 	input: {
@@ -334,6 +437,11 @@ export function setHoldPlacePlay(
 				throw new fw.types.InternalServerError(`Play with id ${currentPlayId} not found`);
 			}
 			return normalizeHoldPlacePlayInfo(holdPlaceRef.id, holdPlaceData, playSnap.data() as Partial<Play>);
+		}
+
+		// 枠を確保したリクエストが失敗して枠を解放した後は、Playを登録しない。
+		if (!holdPlaceData.playSlotReserved) {
+			throw new fw.types.Duplicate("Play slot is not reserved");
 		}
 
 		const now = Timestamp.now();
@@ -407,9 +515,11 @@ export function clearHoldPlacePlay(
 				updatedAt: Timestamp.now(),
 			});
 		}
+		const releasedSlot = releasePlaySlotInTransaction(firestore, transaction, holdPlaceData, Timestamp.now());
 		await transaction.update(holdPlaceRef, {
 			currentPlayId: FieldValue.delete(),
 			updatedAt: Timestamp.now(),
+			...releasedSlot,
 		});
 		return playInfo;
 	});

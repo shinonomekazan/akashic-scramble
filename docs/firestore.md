@@ -25,6 +25,9 @@ plays/
 		playTokens/
 			{playTokenId}
 
+counters/
+	plays
+
 ```
 
 1. Placeはほぼマスターデータとして機能する
@@ -59,9 +62,13 @@ PlaceのcurrentHoldPlaceIdを参照する。
 
 ### Playを作成する
 
-1. HoldPlaceのbehavioursに応じてPlayを生成
-2. HoldPlaceのcurrentPlayIdに値を入れる
-3. currentPlayIdにはScramble側Play IDを入れ、Akashic Play IDを入れない
+1. counters/playsのcountを増やし、HoldPlaceのplaySlotReservedをtrueにして枠を確保する
+	- countが上限（SCRAMBLE_PLAY_LIMIT）以上の場合はPlayを作成しない
+2. HoldPlaceのbehavioursに応じてPlayを生成
+3. HoldPlaceのcurrentPlayIdに値を入れる
+4. currentPlayIdにはScramble側Play IDを入れ、Akashic Play IDを入れない
+
+Playの終了、HoldPlaceの終了、Playの作成失敗の際に、counters/playsのcountを減らしてplaySlotReservedを消す。counters/playsのcountが、Scrambleが起動しているPlay数になる。
 
 ### Playに参加する
 
