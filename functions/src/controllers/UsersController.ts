@@ -5,6 +5,7 @@ import * as validators from "express-validator";
 import * as fw from "../fw";
 import * as params from "../params";
 import * as resolvers from "../resolvers";
+import { Timestamp } from "firebase-admin/firestore";
 import { storeUser, updateUser } from "../stores";
 
 interface RegisterParams {
@@ -63,10 +64,14 @@ export class UsersController extends BaseController {
 	async post(context: Context) {
 		const p = context.params as RegisterParams;
 		const verifyResult = await this.verify(p.authorization);
-		await storeUser(this.app.firestore, {
-			uid: verifyResult.uid,
-			name: p.name,
-		});
+		await storeUser(
+			this.app.firestore,
+			{
+				uid: verifyResult.uid,
+				name: p.name,
+			},
+			Timestamp.now(),
+		);
 		return {
 			user: await resolvers.users.resolve(this.app.firestore, verifyResult.uid),
 		};
@@ -82,10 +87,14 @@ export class UsersController extends BaseController {
 		if (result === null) {
 			throw new fw.types.NotFound("ユーザーが見つかりません");
 		}
-		await updateUser(this.app.firestore, {
-			uid: verifyResult.uid,
-			name: p.name,
-		});
+		await updateUser(
+			this.app.firestore,
+			{
+				uid: verifyResult.uid,
+				name: p.name,
+			},
+			Timestamp.now(),
+		);
 		return {
 			result: "ok",
 		};

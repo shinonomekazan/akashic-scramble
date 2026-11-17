@@ -4,19 +4,25 @@ import * as validators from "express-validator";
 import * as fw from "../fw";
 import * as params from "../params";
 import { Router } from "express";
+import { Timestamp } from "firebase-admin/firestore";
 import { holdPlace, releaseHoldPlace, releasePlaySlot, reservePlaySlot, setHoldPlacePlay } from "../stores";
 import { getCurrentHoldPlacePlayInfo, HoldPlacePlayInfo } from "../resolvers/holdPlaces";
 import { AkashicSystemRegistry, loadAkashicSystemSettings } from "../services/akashicSystem";
 import { buildAkashicGameCode, DEFAULT_SCRAMBLE_PLAY_CONTENT, resolvePlayContentInfo } from "../services/playContent";
 
-// 未設定の場合は上限なしとし、枠の数だけを数える。
-function loadPlayLimit() {
-	const value = process.env.SCRAMBLE_PLAY_LIMIT?.trim();
-	if (!value) return undefined;
-	if (!/^\d+$/.test(value)) {
-		throw new fw.types.InternalServerError("SCRAMBLE_PLAY_LIMIT is invalid.");
-	}
-	return Number(value);
+// Play開始APIのレスポンスを、Playが登録済みのHoldPlaceの情報から作る。
+async function buildStartPlayResult(playInfo: HoldPlacePlayInfo) {
+	const content = await resolvePlayContentInfo(playInfo);
+	return {
+		holdPlaceId: playInfo.holdPlaceId,
+		placeId: playInfo.placeId,
+		playId: playInfo.currentPlayId,
+		gameTitle: content.title,
+		gameDescription: content.description,
+		contentUrl: content.contentUrl,
+		expireAt: playInfo.expireAt?.toDate().toISOString(),
+		joinPath: `/play/${encodeURIComponent(playInfo.holdPlaceId)}`,
+	};
 }
 
 interface IdParams {
@@ -90,6 +96,7 @@ export class PlacesController extends BaseController {
 		const holdPlaceId = await holdPlace(this.app.firestore, {
 			placeId: p.id,
 			holdUserId: verifyResult.uid,
+			now: Timestamp.now(),
 		});
 		return { holdPlaceId };
 	}
@@ -100,6 +107,7 @@ export class PlacesController extends BaseController {
 		const endedHoldPlace = await releaseHoldPlace(this.app.firestore, {
 			placeId: p.id,
 			holdUserId: verifyResult.uid,
+			now: Timestamp.now(),
 		});
 		if (endedHoldPlace?.akashicPlayId) {
 			await this.stopAkashicPlayIfConfigured(endedHoldPlace);
@@ -117,17 +125,7 @@ export class PlacesController extends BaseController {
 			requireOwner: true,
 		});
 		if (target.currentPlayId) {
-			const content = await resolvePlayContentInfo(target);
-			return {
-				holdPlaceId: target.holdPlaceId,
-				placeId: target.placeId,
-				playId: target.currentPlayId,
-				gameTitle: content.title,
-				gameDescription: content.description,
-				contentUrl: content.contentUrl,
-				expireAt: target.expireAt?.toDate().toISOString(),
-				joinPath: `/play/${encodeURIComponent(target.holdPlaceId)}`,
-			};
+			return buildStartPlayResult(target);
 		}
 
 		const content = DEFAULT_SCRAMBLE_PLAY_CONTENT;
@@ -135,8 +133,18 @@ export class PlacesController extends BaseController {
 		const reserved = await reservePlaySlot(this.app.firestore, {
 			holdPlaceId: target.holdPlaceId,
 			holdUserId: verifyResult.uid,
-			limit: loadPlayLimit(),
+			now: Timestamp.now(),
 		});
+		if (!reserved) {
+			// 枠の確保までの間に別のリクエストがPlayを登録していた場合は、そのPlayを返す。
+			const current = await getCurrentHoldPlacePlayInfo(this.app.firestore, {
+				placeId: p.id,
+				holdUserId: verifyResult.uid,
+				requireOwner: true,
+			});
+			return buildStartPlayResult(current);
+		}
+
 		let storedPlay;
 		try {
 			const system = await new AkashicSystemRegistry(settings).chooseClientByRunningPlayCount();
@@ -152,6 +160,7 @@ export class PlacesController extends BaseController {
 					contentCode: content.contentCode,
 					contentUrl: content.contentUrl,
 					ownerUserId: verifyResult.uid,
+					now: Timestamp.now(),
 				});
 
 				// 同時開始で別のPlayが採用された場合、自分が作成した未採用のPlayを残さない。
@@ -165,30 +174,18 @@ export class PlacesController extends BaseController {
 			}
 		} catch (error) {
 			// Playを登録できなかった場合、自分が確保した枠を解放する。
-			if (reserved) {
-				try {
-					await releasePlaySlot(this.app.firestore, { holdPlaceId: target.holdPlaceId });
-				} catch (releaseError) {
-					console.warn(releaseError);
-				}
+			try {
+				await releasePlaySlot(this.app.firestore, { holdPlaceId: target.holdPlaceId, now: Timestamp.now() });
+			} catch (releaseError) {
+				console.warn(releaseError);
 			}
 			throw error;
 		}
 
-		const storedContent = await resolvePlayContentInfo(storedPlay);
-		return {
-			holdPlaceId: storedPlay.holdPlaceId,
-			placeId: storedPlay.placeId,
-			playId: storedPlay.currentPlayId,
-			gameTitle: storedContent.title,
-			gameDescription: storedContent.description,
-			contentUrl: storedContent.contentUrl,
-			expireAt: storedPlay.expireAt?.toDate().toISOString(),
-			joinPath: `/play/${encodeURIComponent(storedPlay.holdPlaceId)}`,
-		};
+		return buildStartPlayResult(storedPlay);
 	}
 
-	private async stopAkashicPlayIfConfigured(playInfo: Pick<HoldPlacePlayInfo, "akashicPlayId" | "systemUrl">) {
+	async stopAkashicPlayIfConfigured(playInfo: Pick<HoldPlacePlayInfo, "akashicPlayId" | "systemUrl">) {
 		if (!process.env.AKASHIC_SYSTEM_API_KEY || !playInfo.akashicPlayId) return;
 		try {
 			const registry = new AkashicSystemRegistry(loadAkashicSystemSettings());

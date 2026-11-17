@@ -25,8 +25,8 @@ plays/
 		playTokens/
 			{playTokenId}
 
-counters/
-	plays
+properties/
+	akashicSystem
 
 ```
 
@@ -62,13 +62,16 @@ PlaceのcurrentHoldPlaceIdを参照する。
 
 ### Playを作成する
 
-1. counters/playsのcountを増やし、HoldPlaceのplaySlotReservedをtrueにして枠を確保する
-	- countが上限（SCRAMBLE_PLAY_LIMIT）以上の場合はPlayを作成しない
+1. properties/akashicSystemのplayCountを増やし、HoldPlaceのplaySlotReservedをtrueにして枠を確保する
+	- playCountが上限（playLimit）以上の場合はPlayを作成しない
+	- 既に別のリクエストが枠を確保している（Playを作成中の）場合はPlayを作成しない
 2. HoldPlaceのbehavioursに応じてPlayを生成
 3. HoldPlaceのcurrentPlayIdに値を入れる
 4. currentPlayIdにはScramble側Play IDを入れ、Akashic Play IDを入れない
 
-Playの終了、HoldPlaceの終了、Playの作成失敗の際に、counters/playsのcountを減らしてplaySlotReservedを消す。counters/playsのcountが、Scrambleが起動しているPlay数になる。
+Playの終了、HoldPlaceの終了、Playの作成失敗の際に、properties/akashicSystemのplayCountを減らしてplaySlotReservedを消す。properties/akashicSystemのplayCountが、Scrambleが起動しているPlay数になる。
+
+properties/akashicSystemはシステム稼働前に手動で作成する（playCount: 0、playLimit: 同時に起動できるPlay数の上限）。存在しない場合、Playは作成できない。作成時に稼働中のPlayがあると数えられないため、稼働中のPlayがない状態で作成する。
 
 ### Playに参加する
 

@@ -1,16 +1,16 @@
 import { UserProfile } from "../types";
-import { Firestore, Timestamp, FieldValue, Transaction } from "firebase-admin/firestore";
+import { DocumentSnapshot, Firestore, Timestamp, FieldValue, Transaction } from "firebase-admin/firestore";
 import { eraseUndefined } from "../utils";
 import * as fw from "../fw";
 import type { HoldPlacePlayInfo } from "../resolvers/holdPlaces";
 import {
+	AkashicSystemProperties,
 	HoldPlace,
 	Place,
 	PlaceBehaviour,
 	PlaceDefaultPermissionBehaviour,
 	PlaceHoldableTimeBehaviour,
 	Play,
-	PlayCounter,
 	PlayPermission,
 } from "../types/firestore";
 
@@ -43,8 +43,20 @@ function resolveHoldExpireAt(behaviours: PlaceBehaviour[], now: Timestamp) {
 	return Timestamp.fromMillis(now.toMillis() + time);
 }
 
-function playCounterRef(firestore: Firestore) {
-	return firestore.collection("counters").doc("plays");
+function akashicSystemPropertiesRef(firestore: Firestore) {
+	return firestore.collection("properties").doc("akashicSystem");
+}
+
+// properties/akashicSystemはシステム稼働前に手動で作成する前提のため、無い場合や値が不正な場合はエラーにする。
+function readAkashicSystemProperties(snapshot: DocumentSnapshot): AkashicSystemProperties {
+	if (!snapshot.exists) {
+		throw new fw.types.InternalServerError("properties/akashicSystem not found");
+	}
+	const data = snapshot.data() as Partial<AkashicSystemProperties>;
+	if (!Number.isInteger(data.playCount) || !Number.isInteger(data.playLimit)) {
+		throw new fw.types.InternalServerError("properties/akashicSystem has invalid playCount or playLimit");
+	}
+	return data as AkashicSystemProperties;
 }
 
 // HoldPlaceが確保している枠を、同じトランザクション内で解放する。
@@ -52,17 +64,12 @@ function releasePlaySlotInTransaction(
 	firestore: Firestore,
 	transaction: Transaction,
 	holdPlaceData: Partial<HoldPlace>,
-	now: Timestamp,
 ) {
 	if (!holdPlaceData.playSlotReserved) return {};
-	transaction.set(
-		playCounterRef(firestore),
-		{
-			count: FieldValue.increment(-1),
-			updatedAt: now,
-		},
-		{ merge: true },
-	);
+	// playCountの減算。対になる加算はreservePlaySlot（Playの作成時）で行う。
+	transaction.update(akashicSystemPropertiesRef(firestore), {
+		playCount: FieldValue.increment(-1),
+	});
 	return { playSlotReserved: FieldValue.delete() };
 }
 
@@ -75,7 +82,7 @@ async function endHoldPlaceTransaction(
 		requireOwner: boolean;
 		placeId?: string;
 		expireAtRequired?: Timestamp;
-		now?: Timestamp;
+		now: Timestamp;
 		allowMissing?: boolean;
 		allowAlreadyEnded?: boolean;
 		requireSameCurrentPlayId?: boolean;
@@ -105,7 +112,7 @@ async function endHoldPlaceTransaction(
 		if (holdPlaceData.expireAt.toMillis() > input.expireAtRequired.toMillis()) return null;
 	}
 
-	const now = input.now ?? Timestamp.now();
+	const now = input.now;
 	const placeId = input.placeId ?? holdPlaceData.placeId;
 	const currentPlayId = holdPlaceData.currentPlayId;
 	if (input.requireSameCurrentPlayId && currentPlayId !== input.expectedCurrentPlayId) return null;
@@ -133,7 +140,7 @@ async function endHoldPlaceTransaction(
 		});
 	}
 
-	const releasedSlot = releasePlaySlotInTransaction(firestore, transaction, holdPlaceData, now);
+	const releasedSlot = releasePlaySlotInTransaction(firestore, transaction, holdPlaceData);
 	await transaction.update(
 		holdPlaceRef,
 		eraseUndefined({
@@ -180,7 +187,7 @@ function normalizeHoldPlacePlayInfo(
 	};
 }
 
-export function storeUser(firestore: Firestore, user: Omit<UserProfile, "createdAt" | "updatedAt">) {
+export function storeUser(firestore: Firestore, user: Omit<UserProfile, "createdAt" | "updatedAt">, now: Timestamp) {
 	return firestore.runTransaction(async (transaction) => {
 		const userDoc = firestore.collection("users").doc(user.uid);
 		const doc = await transaction.get(userDoc);
@@ -191,7 +198,7 @@ export function storeUser(firestore: Firestore, user: Omit<UserProfile, "created
 				eraseUndefined({
 					name: user.name,
 					photoURL: user.photoURL,
-					updatedAt: Timestamp.now(),
+					updatedAt: now,
 				}),
 			);
 		} else {
@@ -201,15 +208,15 @@ export function storeUser(firestore: Firestore, user: Omit<UserProfile, "created
 				eraseUndefined({
 					name: user.name,
 					photoURL: user.photoURL,
-					createdAt: Timestamp.now(),
-					updatedAt: Timestamp.now(),
+					createdAt: now,
+					updatedAt: now,
 				}),
 			);
 		}
 	});
 }
 
-export function updateUser(firestore: Firestore, user: Omit<UserProfile, "createdAt" | "updatedAt">) {
+export function updateUser(firestore: Firestore, user: Omit<UserProfile, "createdAt" | "updatedAt">, now: Timestamp) {
 	return firestore.runTransaction(async (transaction) => {
 		const userDoc = firestore.collection("users").doc(user.uid);
 		const snapshot = await transaction.get(userDoc);
@@ -221,7 +228,7 @@ export function updateUser(firestore: Firestore, user: Omit<UserProfile, "create
 			eraseUndefined({
 				name: user.name,
 				photoURL: user.photoURL,
-				updatedAt: Timestamp.now(),
+				updatedAt: now,
 			}),
 		);
 	});
@@ -232,6 +239,7 @@ export function holdPlace(
 	input: {
 		placeId: string;
 		holdUserId?: string;
+		now: Timestamp;
 	},
 ) {
 	return firestore.runTransaction(async (transaction) => {
@@ -248,7 +256,7 @@ export function holdPlace(
 		}
 
 		const behaviours = Array.isArray(placeData.behaviours) ? placeData.behaviours : [];
-		const now = Timestamp.now();
+		const now = input.now;
 		const holdPlaceRef = firestore.collection("holdPlaces").doc();
 		const holdPlace: HoldPlace = {
 			placeId: input.placeId,
@@ -277,6 +285,7 @@ export function releaseHoldPlace(
 	input: {
 		placeId: string;
 		holdUserId?: string;
+		now: Timestamp;
 	},
 ) {
 	return firestore.runTransaction(async (transaction) => {
@@ -297,7 +306,7 @@ export function releaseHoldPlace(
 			holdUserId: input.holdUserId,
 			requireOwner: true,
 			placeId: input.placeId,
-			now: Timestamp.now(),
+			now: input.now,
 		});
 	});
 }
@@ -326,21 +335,22 @@ export function expireHoldPlace(
 
 /**
  * Play作成前に、Scrambleの同時プレイ数の枠を確保する。
- * 既に枠を確保済み、またはPlayがあるHoldPlaceでは確保せずfalseを返す。
+ * 枠を確保できた場合はtrue、既にPlayがあるHoldPlaceでは確保せずfalseを返す。
+ * 別のリクエストがPlayを作成中（枠を確保済み）の場合は、Akashic SystemのPlayを重複して作らないようエラーにする。
  */
 export function reservePlaySlot(
 	firestore: Firestore,
 	input: {
 		holdPlaceId: string;
 		holdUserId?: string;
-		limit?: number;
+		now: Timestamp;
 	},
 ) {
 	return firestore.runTransaction(async (transaction) => {
 		const holdPlaceRef = firestore.collection("holdPlaces").doc(input.holdPlaceId);
-		const counterRef = playCounterRef(firestore);
+		const propertiesRef = akashicSystemPropertiesRef(firestore);
 		const holdPlaceSnap = await transaction.get(holdPlaceRef);
-		const counterSnap = await transaction.get(counterRef);
+		const properties = readAkashicSystemProperties(await transaction.get(propertiesRef));
 		if (!holdPlaceSnap.exists) {
 			throw new fw.types.NotFound(`HoldPlace with id ${input.holdPlaceId} not found`);
 		}
@@ -353,22 +363,23 @@ export function reservePlaySlot(
 		if (holdUserId && holdUserId !== input.holdUserId) {
 			throw new fw.types.Forbidden("HoldPlace is owned by another user");
 		}
-		if (holdPlaceData.currentPlayId || holdPlaceData.playSlotReserved) return false;
+		if (holdPlaceData.currentPlayId) return false;
+		if (holdPlaceData.playSlotReserved) {
+			throw new fw.types.Duplicate("Play is being created");
+		}
 
-		const count = (counterSnap.data() as Partial<PlayCounter> | undefined)?.count ?? 0;
-		if (input.limit != null && count >= input.limit) {
+		if (properties.playCount >= properties.playLimit) {
 			throw new fw.types.ServiceUnavailableError("Play limit reached");
 		}
 
-		const now = Timestamp.now();
-		const counter: PlayCounter = {
-			count: count + 1,
-			updatedAt: now,
-		};
-		await transaction.set(counterRef, counter);
+		// playCountの加算。対になる減算はreleasePlaySlotInTransaction（Playの終了時や作成失敗時）で、FieldValue.increment(-1)で行う。
+		// 加算だけincrementを使わないのは、直前の上限判定で読んだplayCountに+1して書き込むため。
+		await transaction.update(propertiesRef, {
+			playCount: properties.playCount + 1,
+		});
 		await transaction.update(holdPlaceRef, {
 			playSlotReserved: true,
-			updatedAt: now,
+			updatedAt: input.now,
 		});
 		return true;
 	});
@@ -382,6 +393,7 @@ export function releasePlaySlot(
 	firestore: Firestore,
 	input: {
 		holdPlaceId: string;
+		now: Timestamp;
 	},
 ) {
 	return firestore.runTransaction(async (transaction) => {
@@ -391,11 +403,10 @@ export function releasePlaySlot(
 
 		const holdPlaceData = holdPlaceSnap.data() as Partial<HoldPlace>;
 		if (holdPlaceData.currentPlayId) return;
-		const now = Timestamp.now();
-		const releasedSlot = releasePlaySlotInTransaction(firestore, transaction, holdPlaceData, now);
+		const releasedSlot = releasePlaySlotInTransaction(firestore, transaction, holdPlaceData);
 		if (Object.keys(releasedSlot).length === 0) return;
 		await transaction.update(holdPlaceRef, {
-			updatedAt: now,
+			updatedAt: input.now,
 			...releasedSlot,
 		});
 	});
@@ -412,6 +423,7 @@ export function setHoldPlacePlay(
 		contentCode: string;
 		contentUrl: string;
 		ownerUserId: string;
+		now: Timestamp;
 	},
 ) {
 	const playRef = firestore.collection("plays").doc();
@@ -444,7 +456,7 @@ export function setHoldPlacePlay(
 			throw new fw.types.Duplicate("Play slot is not reserved");
 		}
 
-		const now = Timestamp.now();
+		const now = input.now;
 		const behaviours = Array.isArray(holdPlaceData.behaviours) ? holdPlaceData.behaviours : [];
 		const play: Play = {
 			akashicPlayId: input.akashicPlayId,
@@ -486,6 +498,7 @@ export function clearHoldPlacePlay(
 		holdPlaceId: string;
 		holdUserId?: string;
 		requireOwner: boolean;
+		now: Timestamp;
 	},
 ) {
 	return firestore.runTransaction(async (transaction) => {
@@ -512,13 +525,16 @@ export function clearHoldPlacePlay(
 		if (playRef && playSnap?.exists) {
 			await transaction.update(playRef, {
 				state: "ended",
-				updatedAt: Timestamp.now(),
+				updatedAt: input.now,
 			});
 		}
-		const releasedSlot = releasePlaySlotInTransaction(firestore, transaction, holdPlaceData, Timestamp.now());
+		// 枠はPlayが登録済みの場合だけ解放する。
+		// Playの作成中（枠は確保済みだがcurrentPlayIdが無い）の枠は、作成しているリクエスト自身が解放する。
+		// ここで解放すると、その後に別のリクエストが確保した枠を、作成中のリクエストが失敗時に解放してしまうため。
+		const releasedSlot = currentPlayId ? releasePlaySlotInTransaction(firestore, transaction, holdPlaceData) : {};
 		await transaction.update(holdPlaceRef, {
 			currentPlayId: FieldValue.delete(),
-			updatedAt: Timestamp.now(),
+			updatedAt: input.now,
 			...releasedSlot,
 		});
 		return playInfo;

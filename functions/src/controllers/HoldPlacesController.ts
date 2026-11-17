@@ -4,6 +4,7 @@ import * as validators from "express-validator";
 import * as fw from "../fw";
 import * as params from "../params";
 import { Router } from "express";
+import { Timestamp } from "firebase-admin/firestore";
 import { clearHoldPlacePlay } from "../stores";
 import { getHoldPlacePlayInfo, HoldPlacePlayInfo } from "../resolvers/holdPlaces";
 import {
@@ -99,6 +100,7 @@ export class HoldPlacesController extends BaseController {
 			holdPlaceId: p.id,
 			holdUserId: verifyResult.uid,
 			requireOwner: true,
+			now: Timestamp.now(),
 		});
 		if (playInfo.akashicPlayId) {
 			await this.stopAkashicPlayIfConfigured(playInfo);
@@ -111,7 +113,7 @@ export class HoldPlacesController extends BaseController {
 		};
 	}
 
-	private async stopAkashicPlayIfConfigured(
+	async stopAkashicPlayIfConfigured(
 		playInfo: Pick<HoldPlacePlayInfo, "akashicPlayId" | "systemUrl">,
 	) {
 		if (!process.env.AKASHIC_SYSTEM_API_KEY || !playInfo.akashicPlayId) return;

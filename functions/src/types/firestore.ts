@@ -191,15 +191,19 @@ export interface Play {
 }
 
 /**
- * Scrambleが起動中のPlay数。counters/playsに1件だけ存在する。
+ * Akashic System関連で変更がありえる値。properties/akashicSystemに1件だけ存在する。
+ * システム稼働前に手動で作成する前提で、存在しない場合はエラーとする。
  */
-export interface PlayCounter {
+export interface AkashicSystemProperties {
 	/**
-	 * 枠を確保しているHoldPlaceの数。
+	 * Scrambleが起動しているPlay数（枠を確保しているHoldPlaceの数）。
 	 */
-	count: number;
+	playCount: number;
 
-	updatedAt: Timestamp;
+	/**
+	 * Scrambleが同時に起動できるPlay数の上限。
+	 */
+	playLimit: number;
 }
 
 export interface PlayToken {
