@@ -6,7 +6,7 @@ import * as params from "../params";
 import { Router } from "express";
 import { Timestamp } from "firebase-admin/firestore";
 import { holdPlace, releaseHoldPlace, releasePlaySlot, reservePlaySlot, setHoldPlacePlay } from "../stores";
-import { getCurrentHoldPlacePlayInfo, HoldPlacePlayInfo } from "../resolvers/holdPlaces";
+import { getCurrentHoldPlacePlayInfo, getHoldPlacePlayInfo, HoldPlacePlayInfo } from "../resolvers/holdPlaces";
 import { AkashicSystemRegistry, loadAkashicSystemSettings } from "../services/akashicSystem";
 import { buildAkashicGameCode, DEFAULT_SCRAMBLE_PLAY_CONTENT, resolvePlayContentInfo } from "../services/playContent";
 
@@ -137,11 +137,9 @@ export class PlacesController extends BaseController {
 		});
 		if (!reserved) {
 			// 枠の確保までの間に別のリクエストがPlayを登録していた場合は、そのPlayを返す。
-			const current = await getCurrentHoldPlacePlayInfo(this.app.firestore, {
-				placeId: p.id,
-				holdUserId: verifyResult.uid,
-				requireOwner: true,
-			});
+			// Placeから引き直すと、その間に確保し直された別のHoldPlaceを返しうるため、確保を試みたHoldPlaceのIDで引く。
+			// 所有者の確認はreservePlaySlotで済んでいる。
+			const current = await getHoldPlacePlayInfo(this.app.firestore, { holdPlaceId: target.holdPlaceId });
 			return buildStartPlayResult(current);
 		}
 
