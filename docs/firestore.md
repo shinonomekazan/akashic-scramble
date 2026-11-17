@@ -71,7 +71,7 @@ PlaceのcurrentHoldPlaceIdを参照する。
 
 Playの終了、HoldPlaceの終了、Playの作成失敗の際に、properties/akashicSystemのplayCountを減らしてplaySlotReservedを消す。properties/akashicSystemのplayCountが、Scrambleが起動しているPlay数になる。
 
-properties/akashicSystemはシステム稼働前に手動で作成する（playCount: 0、playLimit: 同時に起動できるPlay数の上限）。存在しない場合、Playは作成できない。作成時に稼働中のPlayがあると数えられないため、稼働中のPlayがない状態で作成する。
+properties/akashicSystemはシステム稼働前に手動で作成する（playCount: 0、playLimit: 同時に起動できるPlay数の上限）。存在しない場合、Playは作成できない。作成時に稼働中のPlayがあると数えられないため、稼働中のPlay（stateがplayingのPlay）が無いことを確認してから作成する。
 
 ### Playに参加する
 

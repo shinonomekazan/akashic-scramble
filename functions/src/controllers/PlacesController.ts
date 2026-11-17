@@ -163,7 +163,8 @@ export class PlacesController extends BaseController {
 					now: Timestamp.now(),
 				});
 
-				// 同時開始で別のPlayが採用された場合、自分が作成した未採用のPlayを残さない。
+				// 枠を確保しているので、通常は自分が作成したPlayが登録される。
+				// 念のため、登録されたPlayが自分の作成したものと違う場合は、自分が作成したPlayを残さないよう停止する。
 				if (storedPlay.akashicPlayId !== createdPlay.id || storedPlay.systemUrl !== system.config.apiBaseUrl) {
 					await system.stopPlay(createdPlay.id);
 				}

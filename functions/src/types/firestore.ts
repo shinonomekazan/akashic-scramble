@@ -92,7 +92,8 @@ export interface HoldPlace {
 
 	/**
 	 * そのHoldPlaceがScrambleの同時プレイ数の枠を確保しているかどうか。
-	 * Playの作成前に確保し、Playの終了やHoldPlaceの終了で解放する。
+	 * Playの作成前に確保し、Playの終了、HoldPlaceの終了、Playの作成失敗で解放する。
+	 * ただし/play/endでは、Playが登録済みの場合だけ解放する（作成中の枠は作成しているリクエスト自身が解放する）。
 	 */
 	playSlotReserved?: boolean;
 

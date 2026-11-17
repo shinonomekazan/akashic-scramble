@@ -348,9 +348,7 @@ export function reservePlaySlot(
 ) {
 	return firestore.runTransaction(async (transaction) => {
 		const holdPlaceRef = firestore.collection("holdPlaces").doc(input.holdPlaceId);
-		const propertiesRef = akashicSystemPropertiesRef(firestore);
 		const holdPlaceSnap = await transaction.get(holdPlaceRef);
-		const properties = readAkashicSystemProperties(await transaction.get(propertiesRef));
 		if (!holdPlaceSnap.exists) {
 			throw new fw.types.NotFound(`HoldPlace with id ${input.holdPlaceId} not found`);
 		}
@@ -368,6 +366,10 @@ export function reservePlaySlot(
 			throw new fw.types.Duplicate("Play is being created");
 		}
 
+		// properties/akashicSystemは全ての開始リクエストが読み書きするため、
+		// トランザクションの競合を減らすよう、HoldPlaceの判定で枠を確保すると決まった後に読む。
+		const propertiesRef = akashicSystemPropertiesRef(firestore);
+		const properties = readAkashicSystemProperties(await transaction.get(propertiesRef));
 		if (properties.playCount >= properties.playLimit) {
 			throw new fw.types.ServiceUnavailableError("Play limit reached");
 		}
@@ -443,6 +445,7 @@ export function setHoldPlacePlay(
 			throw new fw.types.Forbidden("HoldPlace is owned by another user");
 		}
 		const currentPlayId = holdPlaceData.currentPlayId;
+		// 枠の確保により、通常ここに来るのはトランザクションの再試行で自分の登録を読み直した場合。
 		if (currentPlayId) {
 			const playSnap = await transaction.get(firestore.collection("plays").doc(currentPlayId));
 			if (!playSnap.exists) {
@@ -451,7 +454,7 @@ export function setHoldPlacePlay(
 			return normalizeHoldPlacePlayInfo(holdPlaceRef.id, holdPlaceData, playSnap.data() as Partial<Play>);
 		}
 
-		// 枠を確保したリクエストが失敗して枠を解放した後は、Playを登録しない。
+		// 通常は起きないが、枠を確保していない状態でPlayを登録してplayCountとずれることを防ぐ。
 		if (!holdPlaceData.playSlotReserved) {
 			throw new fw.types.Duplicate("Play slot is not reserved");
 		}
