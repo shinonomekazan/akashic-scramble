@@ -445,7 +445,7 @@ export function setHoldPlacePlay(
 			throw new fw.types.Forbidden("HoldPlace is owned by another user");
 		}
 		const currentPlayId = holdPlaceData.currentPlayId;
-		// 枠の確保により、通常ここに来るのはトランザクションの再試行で自分の登録を読み直した場合。
+		// Playを登録するのは枠を確保した1リクエストだけなので通常ここには来ないが、念のため既存のPlayを返す。
 		if (currentPlayId) {
 			const playSnap = await transaction.get(firestore.collection("plays").doc(currentPlayId));
 			if (!playSnap.exists) {
