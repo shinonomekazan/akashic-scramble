@@ -4,10 +4,26 @@ import * as validators from "express-validator";
 import * as fw from "../fw";
 import * as params from "../params";
 import { Router } from "express";
-import { holdPlace, releaseHoldPlace, setHoldPlacePlay } from "../stores";
-import { getCurrentHoldPlacePlayInfo, HoldPlacePlayInfo } from "../resolvers/holdPlaces";
+import { Timestamp } from "firebase-admin/firestore";
+import { holdPlace, releaseHoldPlace, releasePlaySlot, reservePlaySlot, setHoldPlacePlay } from "../stores";
+import { getCurrentHoldPlacePlayInfo, getHoldPlacePlayInfo, HoldPlacePlayInfo } from "../resolvers/holdPlaces";
 import { AkashicSystemRegistry, loadAkashicSystemSettings } from "../services/akashicSystem";
 import { buildAkashicGameCode, DEFAULT_SCRAMBLE_PLAY_CONTENT, resolvePlayContentInfo } from "../services/playContent";
+
+// Play開始APIのレスポンスを、Playが登録済みのHoldPlaceの情報から作る。
+async function buildStartPlayResult(playInfo: HoldPlacePlayInfo) {
+	const content = await resolvePlayContentInfo(playInfo);
+	return {
+		holdPlaceId: playInfo.holdPlaceId,
+		placeId: playInfo.placeId,
+		playId: playInfo.currentPlayId,
+		gameTitle: content.title,
+		gameDescription: content.description,
+		contentUrl: content.contentUrl,
+		expireAt: playInfo.expireAt?.toDate().toISOString(),
+		joinPath: `/play/${encodeURIComponent(playInfo.holdPlaceId)}`,
+	};
+}
 
 interface IdParams {
 	authorization: string;
@@ -80,6 +96,7 @@ export class PlacesController extends BaseController {
 		const holdPlaceId = await holdPlace(this.app.firestore, {
 			placeId: p.id,
 			holdUserId: verifyResult.uid,
+			now: Timestamp.now(),
 		});
 		return { holdPlaceId };
 	}
@@ -90,6 +107,7 @@ export class PlacesController extends BaseController {
 		const endedHoldPlace = await releaseHoldPlace(this.app.firestore, {
 			placeId: p.id,
 			holdUserId: verifyResult.uid,
+			now: Timestamp.now(),
 		});
 		if (endedHoldPlace?.akashicPlayId) {
 			await this.stopAkashicPlayIfConfigured(endedHoldPlace);
@@ -107,65 +125,66 @@ export class PlacesController extends BaseController {
 			requireOwner: true,
 		});
 		if (target.currentPlayId) {
-			const content = await resolvePlayContentInfo(target);
-			return {
-				holdPlaceId: target.holdPlaceId,
-				placeId: target.placeId,
-				playId: target.currentPlayId,
-				gameTitle: content.title,
-				gameDescription: content.description,
-				contentUrl: content.contentUrl,
-				expireAt: target.expireAt?.toDate().toISOString(),
-				joinPath: `/play/${encodeURIComponent(target.holdPlaceId)}`,
-			};
+			return buildStartPlayResult(target);
 		}
 
 		const content = DEFAULT_SCRAMBLE_PLAY_CONTENT;
-		const system = await new AkashicSystemRegistry(settings).chooseClientByRunningPlayCount();
-		const gameCode = buildAkashicGameCode(target.holdPlaceId, content.contentCode);
-		const createdPlay = await system.createPlay(gameCode);
+		// 外部Playを作る前に枠を確保し、同時開始でも上限を超えないようにする。
+		const reserved = await reservePlaySlot(this.app.firestore, {
+			holdPlaceId: target.holdPlaceId,
+			holdUserId: verifyResult.uid,
+			now: Timestamp.now(),
+		});
+		if (!reserved) {
+			// 枠の確保までの間に別のリクエストがPlayを登録していた場合は、そのPlayを返す。
+			// Placeから引き直すと、その間に確保し直された別のHoldPlaceを返しうるため、確保を試みたHoldPlaceのIDで引く。
+			// 所有者の確認はreservePlaySlotで済んでいる。
+			const current = await getHoldPlacePlayInfo(this.app.firestore, { holdPlaceId: target.holdPlaceId });
+			return buildStartPlayResult(current);
+		}
+
 		let storedPlay;
 		try {
-			storedPlay = await setHoldPlacePlay(this.app.firestore, {
-				holdPlaceId: target.holdPlaceId,
-				holdUserId: verifyResult.uid,
-				akashicPlayId: createdPlay.id,
-				systemUrl: system.config.apiBaseUrl,
-				providerId: content.providerId,
-				contentCode: content.contentCode,
-				contentUrl: content.contentUrl,
-				ownerUserId: verifyResult.uid,
-			});
+			const system = await new AkashicSystemRegistry(settings).chooseClientByRunningPlayCount();
+			const gameCode = buildAkashicGameCode(target.holdPlaceId, content.contentCode);
+			const createdPlay = await system.createPlay(gameCode);
+			try {
+				storedPlay = await setHoldPlacePlay(this.app.firestore, {
+					holdPlaceId: target.holdPlaceId,
+					holdUserId: verifyResult.uid,
+					akashicPlayId: createdPlay.id,
+					systemUrl: system.config.apiBaseUrl,
+					providerId: content.providerId,
+					contentCode: content.contentCode,
+					contentUrl: content.contentUrl,
+					ownerUserId: verifyResult.uid,
+					now: Timestamp.now(),
+				});
 
-			// 同時開始で別のPlayが採用された場合、自分が作成した未採用のPlayを残さない。
-			if (
-				storedPlay.akashicPlayId !== createdPlay.id ||
-				storedPlay.systemUrl !== system.config.apiBaseUrl
-			) {
+				// 枠を確保しているので、通常は自分が作成したPlayが登録される。
+				// 念のため、登録されたPlayが自分の作成したものと違う場合は、自分が作成したPlayを残さないよう停止する。
+				if (storedPlay.akashicPlayId !== createdPlay.id || storedPlay.systemUrl !== system.config.apiBaseUrl) {
+					await system.stopPlay(createdPlay.id);
+				}
+			} catch (error) {
+				// Firestoreへの登録に失敗した場合も、先に作成した外部Playを補償的に停止する。
 				await system.stopPlay(createdPlay.id);
+				throw error;
 			}
 		} catch (error) {
-			// Firestoreへの登録に失敗した場合も、先に作成した外部Playを補償的に停止する。
-			await system.stopPlay(createdPlay.id);
+			// Playを登録できなかった場合、自分が確保した枠を解放する。
+			try {
+				await releasePlaySlot(this.app.firestore, { holdPlaceId: target.holdPlaceId, now: Timestamp.now() });
+			} catch (releaseError) {
+				console.warn(releaseError);
+			}
 			throw error;
 		}
 
-		const storedContent = await resolvePlayContentInfo(storedPlay);
-		return {
-			holdPlaceId: storedPlay.holdPlaceId,
-			placeId: storedPlay.placeId,
-			playId: storedPlay.currentPlayId,
-			gameTitle: storedContent.title,
-			gameDescription: storedContent.description,
-			contentUrl: storedContent.contentUrl,
-			expireAt: storedPlay.expireAt?.toDate().toISOString(),
-			joinPath: `/play/${encodeURIComponent(storedPlay.holdPlaceId)}`,
-		};
+		return buildStartPlayResult(storedPlay);
 	}
 
-	private async stopAkashicPlayIfConfigured(
-		playInfo: Pick<HoldPlacePlayInfo, "akashicPlayId" | "systemUrl">,
-	) {
+	async stopAkashicPlayIfConfigured(playInfo: Pick<HoldPlacePlayInfo, "akashicPlayId" | "systemUrl">) {
 		if (!process.env.AKASHIC_SYSTEM_API_KEY || !playInfo.akashicPlayId) return;
 		try {
 			const registry = new AkashicSystemRegistry(loadAkashicSystemSettings());

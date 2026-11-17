@@ -78,7 +78,7 @@ export class GameDriveClient {
 		this.config = config;
 	}
 
-	private request<T>(path: string) {
+	request<T>(path: string) {
 		return requestJson<ApiResponse<T>>(`${this.config.apiBaseUrl}${path}`, {
 			method: "GET",
 			headers: this.config.apiKey ? { "X-API-Key": this.config.apiKey } : {},

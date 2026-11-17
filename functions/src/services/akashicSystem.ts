@@ -131,7 +131,7 @@ export class AkashicSystemClient {
 		this.config = config;
 	}
 
-	private request<T>(method: string, path: string, body?: unknown) {
+	request<T>(method: string, path: string, body?: unknown) {
 		return requestJson<ApiResponse<T>>(
 			`${this.config.apiBaseUrl}${path}`,
 			{
@@ -189,8 +189,8 @@ export class AkashicSystemClient {
 }
 
 export class AkashicSystemRegistry {
-	private readonly selectableClients: AkashicSystemClient[];
-	private readonly clientsByUrl: Map<string, AkashicSystemClient>;
+	readonly selectableClients: AkashicSystemClient[];
+	readonly clientsByUrl: Map<string, AkashicSystemClient>;
 
 	constructor(settings: AkashicSystemSettings) {
 		this.selectableClients = settings.systems.map((config) => new AkashicSystemClient(config));

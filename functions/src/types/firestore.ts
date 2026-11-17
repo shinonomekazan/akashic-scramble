@@ -91,6 +91,13 @@ export interface HoldPlace {
 	currentPlayId?: string;
 
 	/**
+	 * そのHoldPlaceがScrambleの同時プレイ数の枠を確保しているかどうか。
+	 * Playの作成前に確保し、Playの終了、HoldPlaceの終了、Playの作成失敗で解放する。
+	 * ただし/play/endでは、Playが登録済みの場合だけ解放する（作成中の枠は作成しているリクエスト自身が解放する）。
+	 */
+	playSlotReserved?: boolean;
+
+	/**
 	 * HoldPlaceの有効期限。
 	 * Timestamp型だが、分が最小単位であることが保証される。
 	 * この値が存在しない場合、無期限か、時限以外の権利で保有されることを意味する。
@@ -182,6 +189,22 @@ export interface Play {
 	createdAt: Timestamp;
 
 	updatedAt: Timestamp;
+}
+
+/**
+ * Akashic System関連で変更がありえる値。properties/akashicSystemに1件だけ存在する。
+ * システム稼働前に手動で作成する前提で、存在しない場合はエラーとする。
+ */
+export interface AkashicSystemProperties {
+	/**
+	 * Scrambleが起動しているPlay数（枠を確保しているHoldPlaceの数）。
+	 */
+	playCount: number;
+
+	/**
+	 * Scrambleが同時に起動できるPlay数の上限。
+	 */
+	playLimit: number;
 }
 
 export interface PlayToken {
