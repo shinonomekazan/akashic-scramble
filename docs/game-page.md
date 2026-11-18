@@ -11,7 +11,11 @@ Play画面は、ゲームページ（Akashicのゲームを動かすページ）
 
 Functionsは `AKASHIC_SYSTEM_GAME_PAGE_URL` のURLをPlay画面へ返す。
 本体（`akashic-scramble.web.app`）ではなく `firebaseapp.com` 側を指すのは、投稿ゲーム（他人のプログラム）をScramble本体と同じドメインで動かさないため。
-これは当面の措置で、投稿コンテンツを安全に動かす仕組み（専用ドメインやCSP等）は別途検討する。
+同じoriginだと、ゲームのスクリプトからFirebase Authのログイン情報（IndexedDB）を読めてしまう。
+`web.app` と `firebaseapp.com` はPublic Suffix Listで別サイトとして扱われるため、この経路はふさがる。
+
+ただし `firebaseapp.com` はFirebase Authの `authDomain` でもあり、ログイン用のページやiframeと同じoriginになる。
+完全な分離ではないため、これは当面の措置とする。投稿コンテンツを安全に動かす仕組み（専用ドメイン、iframeのsandbox、CSP等）は別途検討する。
 
 ## 取り込み元
 
