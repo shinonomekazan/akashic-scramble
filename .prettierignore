@@ -5,3 +5,5 @@ firestore.rules
 functions
 public*/js/*.bundle.js
 bootstrap.min.css
+# Akashic System側から持ってきたゲームページ一式。整形せずに元のまま保つ
+public/contents

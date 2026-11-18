@@ -1,0 +1,9 @@
+{
+  "content_url": "/contents/rocket-game/game.json",
+  "asset_base_url": "/contents/rocket-game/",
+  "engine_urls": [
+    "/contents/engines/akashic-runtime/3.13.4-0/engineFilesV3_13_4.js",
+    "/contents/engines/akashic-runtime/3.13.4-0/playlogClientV7_3_1.js"
+  ],
+  "external": []
+}

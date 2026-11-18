@@ -93,7 +93,7 @@ export function loadAkashicSystemSettings(): AkashicSystemSettings {
 		systems: uniqueSystemUrls.map((apiBaseUrl) => ({ apiBaseUrl, apiKey })),
 		gamePageUrl:
 			process.env.AKASHIC_SYSTEM_GAME_PAGE_URL ??
-			"https://akashic-system.shinonomekazan.com/contents/index.html",
+			"https://akashic-scramble.firebaseapp.com/contents/index.html",
 	};
 }
 
