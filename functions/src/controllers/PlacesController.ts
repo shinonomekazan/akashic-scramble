@@ -8,7 +8,11 @@ import { Timestamp } from "firebase-admin/firestore";
 import { holdPlace, releaseHoldPlace, releasePlaySlot, reservePlaySlot, setHoldPlacePlay } from "../stores";
 import { getCurrentHoldPlacePlayInfo, getHoldPlacePlayInfo, HoldPlacePlayInfo } from "../resolvers/holdPlaces";
 import { AkashicSystemRegistry, loadAkashicSystemSettings } from "../services/akashicSystem";
-import { buildAkashicGameCode, DEFAULT_SCRAMBLE_PLAY_CONTENT, resolvePlayContentInfo } from "../services/playContent";
+import {
+	buildAkashicGameCode,
+	DEFAULT_SCRAMBLE_PLAY_CONTENT_REF,
+	resolvePlayContentInfo,
+} from "../services/playContent";
 
 // Play開始APIのレスポンスを、Playが登録済みのHoldPlaceの情報から作る。
 async function buildStartPlayResult(playInfo: HoldPlacePlayInfo) {
@@ -128,7 +132,8 @@ export class PlacesController extends BaseController {
 			return buildStartPlayResult(target);
 		}
 
-		const content = DEFAULT_SCRAMBLE_PLAY_CONTENT;
+		// 枠を確保する前にGame Driveからコンテンツを引く。引けなかったときに枠を確保したまま失敗しないようにするため。
+		const content = await resolvePlayContentInfo(DEFAULT_SCRAMBLE_PLAY_CONTENT_REF);
 		// 外部Playを作る前に枠を確保し、同時開始でも上限を超えないようにする。
 		const reserved = await reservePlaySlot(this.app.firestore, {
 			holdPlaceId: target.holdPlaceId,
