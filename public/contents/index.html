@@ -1,0 +1,447 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Akashic agvw client</title>
+  <link rel="icon" href="data:,">
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #20242a;
+      --panel: #2c323a;
+      --panel-2: #171a1f;
+      --text: #f5f7fa;
+      --muted: #b7c0cc;
+      --accent: #42c6a4;
+      --border: #4c5663;
+      --error: #ff8a8a;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      display: grid;
+      grid-template-rows: auto 1fr;
+    }
+
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 12px 18px;
+      background: var(--panel);
+      border-bottom: 1px solid var(--border);
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 16px;
+      font-weight: 650;
+      letter-spacing: 0;
+    }
+
+    #status {
+      color: var(--muted);
+      font-size: 13px;
+      text-align: right;
+    }
+
+    #status a {
+      color: #8bd9ff;
+      text-decoration: none;
+      margin-left: 10px;
+    }
+
+    #status.error { color: var(--error); }
+
+    main {
+      display: grid;
+      place-items: center;
+      padding: 18px;
+    }
+
+    #container {
+      width: min(720px, calc(100vw - 36px));
+      aspect-ratio: 1 / 1;
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+      overflow: hidden;
+      touch-action: none;
+      user-select: none;
+    }
+
+    .mode {
+      color: var(--accent);
+      font-weight: 650;
+    }
+  </style>
+  <script src="./dist/index.js"></script>
+</head>
+<body>
+  <header>
+    <h1>Akashic agvw client</h1>
+    <div id="status">Initializing... <a href="/contents/sessions.html">Session Console</a></div>
+  </header>
+  <main>
+    <div id="container" aria-label="game view"></div>
+  </main>
+
+  <script>
+    const params = new URLSearchParams(location.search);
+    let gameCode = params.get("game_code") || params.get("gameCode") || params.get("game") || "rocket-game";
+    let contentUrl = params.get("content_url") || params.get("contentUrl") || "/contents/" + gameCode + "/content.json";
+    const DEFAULT_PLAYLOG_SERVER_URL = location.protocol === "https:" ? "wss://" + location.host : "ws://" + location.hostname + ":4001";
+    const GAME_SIZE = 720;
+    const SCRAMBLE_DEMO_STORAGE_KEY = "akashic-system-scramble-play-demo";
+    const OWNED_PLAY_TTL_MS = 6 * 60 * 60 * 1000;
+    const CONFIG_SOURCE = (params.get("config_source") || params.get("configSource") || "").toLowerCase();
+    const PARENT_ORIGIN = params.get("parent_origin") || params.get("parentOrigin") || "";
+    const BROWSER_ACTIVE_PERMISSION = {
+      writeTick: true,
+      readTick: true,
+      subscribeTick: true,
+      sendEvent: true,
+      subscribeEvent: true,
+      maxEventPriority: 0
+    };
+    const PASSIVE_PERMISSION = {
+      readTick: true,
+      subscribeTick: true,
+      sendEvent: true,
+      maxEventPriority: 2
+    };
+
+    let requestedMode = (params.get("mode") || "solo").toLowerCase();
+    let mode = requestedMode;
+    const statusElement = document.getElementById("status");
+    let externalLaunchConfig = null;
+
+    function setStatus(message, isError) {
+      statusElement.innerHTML = message;
+      statusElement.classList.toggle("error", !!isError);
+    }
+
+    function describeError(error) {
+      const parts = [];
+      let current = error;
+      while (current && parts.length < 4) {
+        parts.push(current.message || current.name || String(current));
+        current = current.cause;
+      }
+      return parts.join(" / ");
+    }
+
+    function loadScrambleDemoSettings() {
+      try {
+        return pruneOwnedPlays(JSON.parse(localStorage.getItem(SCRAMBLE_DEMO_STORAGE_KEY) || "{}"));
+      } catch (e) {
+        return {};
+      }
+    }
+
+    function saveScrambleDemoSettings(settings) {
+      localStorage.setItem(SCRAMBLE_DEMO_STORAGE_KEY, JSON.stringify(pruneOwnedPlays(settings)));
+    }
+
+    function normalizeBaseUrl(value) {
+      return String(value || "").trim().replace(/\/+$/, "");
+    }
+
+    function pruneOwnedPlays(settings) {
+      const now = Date.now();
+      const ownedPlays = settings.ownedPlays || {};
+      for (const playId of Object.keys(ownedPlays)) {
+        const createdAt = Number(ownedPlays[playId] && ownedPlays[playId].createdAt) || 0;
+        if (!createdAt || now - createdAt > OWNED_PLAY_TTL_MS) {
+          delete ownedPlays[playId];
+        }
+      }
+      settings.ownedPlays = ownedPlays;
+      return settings;
+    }
+
+    function getOwnedPlay(playId) {
+      if (!playId) return null;
+      const settings = loadScrambleDemoSettings();
+      return settings.ownedPlays && settings.ownedPlays[String(playId)] || null;
+    }
+
+    function getDemoClientId() {
+      const settings = loadScrambleDemoSettings();
+      if (!settings.clientId) {
+        settings.clientId = "client-" + Date.now() + "-" + Math.floor(Math.random() * 1000000);
+        saveScrambleDemoSettings(settings);
+      }
+      return settings.clientId;
+    }
+
+    function resolveModeForPlay(playId) {
+      if (requestedMode !== "auto") {
+        return requestedMode;
+      }
+      const ownedPlay = getOwnedPlay(playId);
+      return ownedPlay && !ownedPlay.hasActiveInstance ? "active" : "passive";
+    }
+
+    function resolveUserId(resolvedMode) {
+      const userId = params.get("user_id") || params.get("userId");
+      if (userId) return userId;
+      if (externalLaunchConfig && externalLaunchConfig.userId) return externalLaunchConfig.userId;
+      return "scramble-demo-" + resolvedMode + "-" + getDemoClientId();
+    }
+
+    function waitForLaunchConfig() {
+      return new Promise(function (resolve, reject) {
+        const timeoutId = setTimeout(function () {
+          window.removeEventListener("message", onMessage);
+          reject(new Error("Launch config was not received."));
+        }, 30000);
+
+        function onMessage(event) {
+          if (PARENT_ORIGIN && event.origin !== PARENT_ORIGIN) {
+            return;
+          }
+          const data = event.data || {};
+          if (data.type !== "akashic-system-launch-config") {
+            return;
+          }
+          clearTimeout(timeoutId);
+          window.removeEventListener("message", onMessage);
+          resolve(data.payload || {});
+        }
+
+        window.addEventListener("message", onMessage);
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage({ type: "akashic-system-launch-ready" }, PARENT_ORIGIN || "*");
+        }
+      });
+    }
+
+    function applyExternalLaunchConfig(config) {
+      const nextMode = String(config.mode || "").toLowerCase();
+      if (nextMode !== "active" && nextMode !== "passive") {
+        throw new Error("Launch config mode must be active or passive.");
+      }
+      if (!config.playId) throw new Error("Launch config playId is required.");
+      if (!config.playToken) throw new Error("Launch config playToken is required.");
+      if (!config.playlogServerUrl) throw new Error("Launch config playlogServerUrl is required.");
+
+      externalLaunchConfig = config;
+      requestedMode = nextMode;
+      mode = nextMode;
+      gameCode = config.gameCode || gameCode;
+      contentUrl = config.contentUrl || contentUrl;
+    }
+
+    function getDemoApiKey(settings) {
+      if (settings.apiKey) {
+        return String(settings.apiKey).trim();
+      }
+      const input = window.prompt("X-API-Keyを入力してください。このブラウザのlocalStorageに保存します。");
+      if (!input || !input.trim()) {
+        throw new Error("X-API-Key is not saved in localStorage.");
+      }
+      settings.apiKey = input.trim();
+      if (!settings.apiBaseUrl) {
+        settings.apiBaseUrl = location.origin + "/api";
+      }
+      saveScrambleDemoSettings(settings);
+      return settings.apiKey;
+    }
+
+    async function requestSystemApi(path, options) {
+      const settings = loadScrambleDemoSettings();
+      const apiBaseUrl = normalizeBaseUrl(settings.apiBaseUrl || (location.origin + "/api"));
+      const apiKey = getDemoApiKey(settings);
+      const response = await fetch(apiBaseUrl + path, {
+        ...options,
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          "X-API-Key": apiKey,
+          ...((options && options.headers) || {})
+        }
+      });
+      const text = await response.text();
+      let body = null;
+      if (text) {
+        try {
+          body = JSON.parse(text);
+        } catch (e) {
+          throw new Error("Invalid JSON from System API: " + text.slice(0, 120));
+        }
+      }
+      if (!response.ok) {
+        const message = body && body.error && body.error.message
+          ? body.error.message
+          : "HTTP " + response.status + " from " + apiBaseUrl + path;
+        throw new Error(message);
+      }
+      if (!body || body.data == null) {
+        throw new Error("System API response does not contain data.");
+      }
+      return body.data;
+    }
+
+    async function createPlayToken(playId, userId, permission) {
+      return requestSystemApi("/v1.0/plays/" + encodeURIComponent(playId) + "/tokens", {
+        method: "POST",
+        body: JSON.stringify({
+          userId: userId,
+          permission: permission
+        })
+      });
+    }
+
+    function pickRunningPlay(playsBody) {
+      const data = playsBody && playsBody.data;
+      const values = Array.isArray(data && data.values) ? data.values : Array.isArray(data) ? data : [];
+      const running = values.filter(function (play) { return play.status === "running"; });
+      const candidates = running.length ? running : values;
+      candidates.sort(function (a, b) {
+        return Date.parse(b.started || 0) - Date.parse(a.started || 0);
+      });
+      return candidates[0] || null;
+    }
+
+    function browserReachablePlaylogUrl(url) {
+      if (!url) return DEFAULT_PLAYLOG_SERVER_URL;
+      try {
+        const parsed = new URL(url);
+        if (parsed.hostname === "playlog-server" || parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1") {
+          parsed.hostname = location.hostname;
+        }
+        return parsed.toString();
+      } catch (e) {
+        return DEFAULT_PLAYLOG_SERVER_URL;
+      }
+    }
+
+    async function createPassivePlayConfig(userId) {
+      if (externalLaunchConfig) {
+        return {
+          playId: String(externalLaunchConfig.playId),
+          executionMode: window.agv.ExecutionMode.Passive,
+          playlogServerUrl: browserReachablePlaylogUrl(externalLaunchConfig.playlogServerUrl),
+          playToken: externalLaunchConfig.playToken
+        };
+      }
+
+      let playId = params.get("play_id") || params.get("playId");
+      if (!playId) {
+        const play = pickRunningPlay({ data: await requestSystemApi("/v1.0/plays") });
+        playId = play && play.id;
+      }
+      if (!playId) throw new Error("No running play found. Start a server-side Active instance first.");
+
+      const token = await createPlayToken(playId, userId, PASSIVE_PERMISSION);
+      if (!token || !token.value) throw new Error("Play token API did not return data.value");
+
+      return {
+        playId: String(playId),
+        executionMode: window.agv.ExecutionMode.Passive,
+        playlogServerUrl: browserReachablePlaylogUrl(token.url),
+        playToken: token.value
+      };
+    }
+
+    async function createSoloPlayConfig() {
+      return {
+        playId: "solo-" + Date.now(),
+        executionMode: window.agv.ExecutionMode.Active
+      };
+    }
+
+    async function createActivePlayConfig(userId) {
+      if (externalLaunchConfig) {
+        return {
+          playId: String(externalLaunchConfig.playId),
+          executionMode: window.agv.ExecutionMode.Active,
+          playlogServerUrl: browserReachablePlaylogUrl(externalLaunchConfig.playlogServerUrl),
+          playToken: externalLaunchConfig.playToken
+        };
+      }
+
+      const playId = params.get("play_id") || params.get("playId");
+      if (!playId) {
+        throw new Error("Active mode requires play_id.");
+      }
+      const token = await createPlayToken(playId, userId, BROWSER_ACTIVE_PERMISSION);
+      if (!token || !token.value) throw new Error("Play token API did not return data.value");
+      return {
+        playId: String(playId),
+        executionMode: window.agv.ExecutionMode.Active,
+        playlogServerUrl: browserReachablePlaylogUrl(token.url),
+        playToken: token.value
+      };
+    }
+
+    window.addEventListener("load", async function () {
+      window.agv = window.require("@akashic/akashic-gameview-web");
+      if (CONFIG_SOURCE === "post_message") {
+        setStatus("Waiting launch config...");
+        applyExternalLaunchConfig(await waitForLaunchConfig());
+      }
+      const playIdFromParams = params.get("play_id") || params.get("playId");
+      mode = externalLaunchConfig ? requestedMode : resolveModeForPlay(playIdFromParams);
+      const userId = resolveUserId(mode);
+      const container = document.getElementById("container");
+
+      try {
+        setStatus("Loading <span class=\"mode\">" + mode + "</span>...");
+        const playConfig = mode === "passive"
+          ? await createPassivePlayConfig(userId)
+          : mode === "active"
+            ? await createActivePlayConfig(userId)
+            : await createSoloPlayConfig();
+
+        const gameview = new agv.AkashicGameView({
+          container: container,
+          width: GAME_SIZE,
+          height: GAME_SIZE
+        });
+
+        const gameContent = new agv.GameContent({
+          contentUrl: contentUrl,
+          player: { id: userId },
+          playConfig: playConfig,
+          contentLayout: {
+            scaleMode: agv.ScaleMode.AspectFit,
+            passthroughEvent: false,
+            backgroundColor: "black"
+          },
+          eventDropPolicy: agv.EventDropPolicy.Never
+        });
+
+        gameContent.addErrorListener({
+          onError: function (e) {
+            console.error("Game Error:", e, "cause:", e && e.cause);
+            setStatus("Game Error: " + describeError(e), true);
+          }
+        });
+
+        gameContent.addContentLoadListener({
+          onLoad: function (seconds) {
+            setStatus(
+              "Mode: <span class=\"mode\">" + mode + "</span> / Play: " + playConfig.playId + " / User: " + userId + " / Loaded: " + seconds.toFixed(2) + "s"
+            );
+          }
+        });
+
+        gameview.addContent(gameContent);
+
+      } catch (err) {
+        console.error("Init Error:", err);
+        setStatus("Init Error: " + err.message, true);
+      }
+    });
+  </script>
+</body>
+</html>
